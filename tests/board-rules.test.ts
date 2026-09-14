@@ -75,6 +75,25 @@ function fixture(tiles: Record<string, TileDefinition> = {}, count = 2) {
 const first = (events: MatchEvent[], type: string, seat = "a") =>
   events.filter((event) => event.register === 1 && event.type === type && event.seatId === seat);
 
+test("concurrent lobby selections survive delayed snapshots while preserving validation", () => {
+  const state = createLobby("LOBBYTEST1", { seatId: "a", robotId: "hammer-bot", displayName: "Ada", connected: true }, 1, 91);
+  addSeat(state, { seatId: "b", robotId: "hulk-x90", displayName: "Grace", connected: true });
+  const revision = state.revision;
+  applyCommand(state, "b", { type: "choose-spawn", id: "guest-dock", revision, dock: 5 });
+  applyCommand(state, "a", { type: "choose-course", id: "course", revision, courseId: "against-the-grain" });
+  applyCommand(state, "a", { type: "choose-spawn", id: "host-dock", revision, dock: 7 });
+  assert.equal(state.courseId, "against-the-grain");
+  assert.deepEqual(state.robots.map((robot) => robot.spawnDock), [7, 5]);
+  assert.throws(() => applyCommand(state, "b", { type: "choose-spawn", id: "taken", revision, dock: 7 }), /already taken/);
+  assert.throws(() => applyCommand(state, "b", { type: "choose-course", id: "guest-course", revision, courseId: "risky-exchange" }), /Only the host/);
+  assert.throws(() => applyCommand(state, "a", { type: "choose-spawn", id: "host-dock", revision, dock: 8 }), /already accepted/);
+  assert.throws(() => applyCommand(state, "a", { type: "choose-spawn", id: "future", revision: state.revision + 1, dock: 8 }), /room changed/);
+  assert.throws(() => applyCommand(state, "a", { type: "start", id: "stale-start", revision, courseId: state.courseId, fourLifeRule: false }), /room changed/);
+  applyCommand(state, "a", { type: "start", id: "start", revision: state.revision, courseId: state.courseId, fourLifeRule: false });
+  assert.throws(() => applyCommand(state, "a", { type: "choose-spawn", id: "in-race", revision, dock: 8 }), /room changed/);
+  assert.throws(() => applyCommand(state, "a", { type: "choose-spawn", id: "in-race-current", revision: state.revision, dock: 8 }), /before the race/);
+});
+
 test("printed arrows agree with north/east/south/west movement vectors", () => {
   for (const [direction, [x, z]] of Object.entries(vectors)) {
     const arrow = new Vector3(0, 1, 0).applyEuler(

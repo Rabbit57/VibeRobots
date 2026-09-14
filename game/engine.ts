@@ -115,7 +115,10 @@ function newRobot(setup: SeatSetup, dock: Position): RobotState {
 
 export function applyCommand(state: MatchState, seatId: string, command: MatchCommand, now = Date.now()): CommandResult {
   if (!state.robots.some((robot) => robot.seatId === seatId)) throw new RuleError('unauthorized', 'Seat does not belong to this room.');
-  if (command.revision !== state.revision) throw new RuleError('stale', 'The room changed. Refreshing from the server.');
+  // Lobby selections are validated against current dock availability and host ownership.
+  // Accept older snapshots so rapid selections and different players' choices can coexist.
+  const concurrentLobbyChoice = state.phase === 'lobby' && command.revision >= 0 && command.revision < state.revision && (command.type === 'choose-spawn' || command.type === 'choose-course');
+  if (command.revision !== state.revision && !concurrentLobbyChoice) throw new RuleError('stale', 'The room changed. Refreshing from the server.');
   if (state.recentCommandIds.includes(command.id)) throw new RuleError('duplicate', 'That command was already accepted.');
   if (state.phase === 'paused') throw new RuleError('out-of-turn', 'The match is paused while a player reconnects.');
 
