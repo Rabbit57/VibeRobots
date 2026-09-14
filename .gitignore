@@ -13,3 +13,6 @@ worker-configuration.d.ts
 .DS_Store
 *.log
 *.blend1
+
+__pycache__/
+artifacts/

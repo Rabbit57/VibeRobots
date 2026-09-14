@@ -11,6 +11,7 @@ and keep production builds independent from Blender.
 from __future__ import annotations
 
 import math
+import subprocess
 from pathlib import Path
 
 import bpy
@@ -24,20 +25,20 @@ PORTRAIT_DIR = ROOT / "art" / "blender" / "renders"
 SOURCE_DIR = ROOT / "art" / "blender" / "source"
 
 PALETTE = {
-    "plum": (0.105, 0.075, 0.15, 1),
-    "steel": (0.20, 0.18, 0.24, 1),
+    "plum": (0.035, 0.105, 0.11, 1),
+    "steel": (0.16, 0.24, 0.22, 1),
     "cream": (0.95, 0.88, 0.74, 1),
     "peach": (0.95, 0.55, 0.35, 1),
     "amber": (0.96, 0.52, 0.10, 1),
     "sage": (0.28, 0.58, 0.42, 1),
     "blue": (0.18, 0.48, 0.68, 1),
-    "red": (0.86, 0.12, 0.09, 1),
-    "yellow": (0.96, 0.56, 0.05, 1),
-    "green": (0.20, 0.67, 0.26, 1),
+    "red": (0.90, 0.34, 0.27, 1),
+    "yellow": (0.98, 0.69, 0.20, 1),
+    "green": (0.36, 0.66, 0.43, 1),
     "orange": (0.94, 0.29, 0.08, 1),
     "lavender": (0.48, 0.32, 0.75, 1),
-    "cyan": (0.16, 0.67, 0.78, 1),
-    "pink": (0.92, 0.30, 0.56, 1),
+    "cyan": (0.32, 0.72, 0.67, 1),
+    "pink": (0.93, 0.45, 0.51, 1),
     "ivory": (0.90, 0.86, 0.73, 1),
 }
 
@@ -86,7 +87,7 @@ def finish(obj, name: str, mat, bevel=0.055):
     if bevel:
         mod = obj.modifiers.new("Soft bevel", "BEVEL")
         mod.width = bevel
-        mod.segments = 2
+        mod.segments = 3
         bpy.context.view_layer.objects.active = obj
         bpy.ops.object.modifier_apply(modifier=mod.name)
     obj.data.materials.append(mat)
@@ -122,14 +123,37 @@ def parent_all(root, objects):
         obj.parent = root
 
 
+def stroke(name, points, thickness, mat):
+    curve = bpy.data.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    curve.bevel_depth = thickness
+    curve.bevel_resolution = 2
+    spline = curve.splines.new("POLY")
+    spline.points.add(len(points) - 1)
+    for point, co in zip(spline.points, points):
+        point.co = (*co, 1)
+    obj = bpy.data.objects.new(name, curve)
+    bpy.context.collection.objects.link(obj)
+    obj.data.materials.append(mat)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+    bpy.ops.object.convert(target="MESH")
+    obj.select_set(False)
+    return obj
+
+
 def add_face(parts, body_mat, expression="happy"):
-    screen = material("Screen", PALETTE["plum"], metallic=0.05, roughness=0.25)
-    glow = material("Face glow", PALETTE["cream"], metallic=0, roughness=0.2, emission=PALETTE["cream"], strength=3)
-    parts.append(cube("face_screen", (0, -0.39, 0.68), (0.52, 0.09, 0.30), screen, 0.085))
-    eye_z = 0.70
-    eye_size = (0.075, 0.025, 0.055 if expression != "tank" else 0.035)
-    parts.append(cube("eye_l", (-0.13, -0.445, eye_z), eye_size, glow, 0.025))
-    parts.append(cube("eye_r", (0.13, -0.445, eye_z), eye_size, glow, 0.025))
+    screen = material("Screen", PALETTE["plum"], metallic=0, roughness=0.4)
+    glow = material("Face glow", PALETTE["cream"], metallic=0, roughness=0.5, emission=PALETTE["cream"], strength=0.45)
+    blush = material("Apricot blush", (1, .38, .28, 1), metallic=0, roughness=.7)
+    parts.append(cube("face_screen", (0, -0.335, 0.69), (0.56, 0.16, 0.36), screen, 0.14))
+    for x in [-.135, .135]:
+        points = [(x + math.cos(i * math.pi / 8) * .052, -.424, .70 + math.sin(i * math.pi / 8) * .062) for i in range(9)]
+        parts.append(stroke("eye_l" if x < 0 else "eye_r", points, .018, glow))
+        cheek = sphere("blush", (x * 1.25, -.423, .62), .036, blush)
+        cheek.scale = (1, .22, .65)
+        parts.append(cheek)
+    parts.append(stroke("smile", [(math.cos(i * math.pi / 8) * .031, -.424, .64 - math.sin(i * math.pi / 8) * .018) for i in range(9)], .009, glow))
     return body_mat
 
 
@@ -146,8 +170,8 @@ def make_robot(robot_id: str, color_name: str, silhouette: str):
     root["robot_id"] = robot_id
     root["animation_contract"] = "idle,move,turn,bump,hit,power-down,respawn,victory"
 
-    body = material(f"{color_name.title()} paint", PALETTE[color_name], metallic=0.32, roughness=0.34)
-    accent = material("Warm steel", PALETTE["steel"], metallic=0.65, roughness=0.30)
+    body = material(f"{color_name.title()} paint", PALETTE[color_name], metallic=0.12, roughness=0.44)
+    accent = material("Warm steel", PALETTE["steel"], metallic=0.2, roughness=0.55)
     cream = material("Warm cream", PALETTE["cream"], metallic=0.05, roughness=0.5)
     parts = []
 
@@ -156,7 +180,15 @@ def make_robot(robot_id: str, color_name: str, silhouette: str):
         "crusher": (0.72, 0.72, 0.50), "hauler": (0.72, 0.78, 0.54), "antenna": (0.56, 0.58, 0.48),
         "walker": (0.58, 0.55, 0.52), "hammer": (0.65, 0.62, 0.54),
     }[silhouette]
-    parts.append(cube("body", (0, 0, 0.48), body_size, body, 0.105))
+    shell = sphere("body", (0, 0, .56), 1, body)
+    shell.scale = (body_size[0] * .62, body_size[1] * .60, .43)
+    bpy.context.view_layer.objects.active = shell
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    parts.append(shell)
+    parts.append(torus("shell_seam", (0, 0, .50), body_size[0] * .51, .022, cream))
+    for x in [-1, 1]:
+        parts.append(cylinder("ear_cap", (x * body_size[0] * .55, -.04, .65), .105, .09, cream, rotation=(0, math.pi / 2, 0)))
+        parts.append(cylinder("ear_screw", (x * (body_size[0] * .55 + .048), -.04, .65), .032, .008, accent, rotation=(0, math.pi / 2, 0)))
     add_face(parts, body, "tank" if silhouette == "tank" else "happy")
 
     if silhouette in {"tank", "racer", "crusher", "hauler", "antenna"}:
@@ -196,6 +228,17 @@ def make_robot(robot_id: str, color_name: str, silhouette: str):
             parts.append(cube(f"wing_post_{x}", (x, 0.39, 0.42), (0.06, 0.08, 0.26), accent, 0.015))
 
     parent_all(root, parts)
+    # All motion is on RobotRoot; merge its static parts by material to keep
+    # eight-character races inexpensive without changing the animation contract.
+    groups = {}
+    for part in parts:
+        groups.setdefault(part.data.materials[0].name, []).append(part)
+    for name, objects in groups.items():
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in objects: obj.select_set(True)
+        bpy.context.view_layer.objects.active = objects[0]
+        bpy.ops.object.join()
+        bpy.context.object.name = "robot_" + name.replace(" ", "_").lower()
     add_animation_contract(root)
     return root
 
@@ -244,17 +287,21 @@ def setup_render():
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.film_transparent = True
-    scene.world.color = (0.03, 0.02, 0.05)
+    scene.world.color = (0.3, 0.3, 0.3)
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.engine = "CYCLES"
+    scene.cycles.samples = 24
+    scene.cycles.use_denoising = True
     bpy.ops.object.light_add(type="AREA", location=(3, -4, 6))
     key = bpy.context.object
     key.data.energy = 850
-    key.data.color = (1.0, 0.55, 0.35)
+    key.data.color = (1.0, 0.88, 0.70)
     key.data.shape = "DISK"
     key.data.size = 5
     bpy.ops.object.light_add(type="AREA", location=(-4, 1, 4))
     fill = bpy.context.object
     fill.data.energy = 500
-    fill.data.color = (0.45, 0.32, 0.80)
+    fill.data.color = (0.70, 0.86, 1.0)
     fill.data.size = 4
     # Keep the robot large in the transparent square so 34–60 px UI portraits
     # remain expressive without a runtime crop or oversized source texture.
@@ -278,15 +325,33 @@ def export_robot(robot_id: str):
     setup_render()
     bpy.context.scene.render.filepath = str(PORTRAIT_DIR / f"{robot_id}.png")
     bpy.ops.render.render(write_still=True)
+    subprocess.run(["cwebp", "-quiet", "-q", "86", str(PORTRAIT_DIR / f"{robot_id}.png"), "-o", str(ROOT / "public/assets/images/robots" / f"{robot_id}.webp")], check=True)
+
+
+def make_gear(gold):
+    ring = torus("gear", (0, 0, 0), .24, .075, gold)
+    teeth = []
+    for i in range(8):
+        a = i * math.pi / 4
+        tooth = cube("gear_tooth", (math.sin(a)*.31, math.cos(a)*.31, 0), (.12,.14,.105), gold, .018)
+        tooth.rotation_euler.z = -a
+        teeth.append(tooth)
+    bpy.ops.object.select_all(action="DESELECT")
+    ring.select_set(True)
+    for tooth in teeth: tooth.select_set(True)
+    bpy.context.view_layer.objects.active = ring
+    bpy.ops.object.join()
+    ring.name = "gear"
+    return ring
 
 
 def make_factory_kit():
     clean()
-    steel = material("Plum steel", PALETTE["steel"], metallic=0.52, roughness=0.34)
+    steel = material("Sage enamel", (.24, .40, .33, 1), metallic=0.05, roughness=0.65)
     cream = material("Cream tile", PALETTE["cream"], metallic=0.10, roughness=0.50)
-    wood = material("Warm wood", (0.35, 0.14, 0.06, 1), metallic=0, roughness=0.62)
-    amber = material("Amber belt", PALETTE["amber"], metallic=0.22, roughness=0.40)
-    blue = material("Blue belt", PALETTE["blue"], metallic=0.22, roughness=0.38)
+    wood = material("Warm wood", (0.53, 0.30, 0.15, 1), metallic=0, roughness=0.62)
+    amber = material("Amber belt", (.90, .48, .28, 1), metallic=0.04, roughness=0.65)
+    blue = material("Blue belt", (.28, .60, .51, 1), metallic=0.04, roughness=0.65)
     mint = material("Repair glow", PALETTE["sage"], metallic=0.12, roughness=0.35, emission=PALETTE["sage"], strength=1.2)
     red = material("Laser glow", PALETTE["red"], metallic=0.22, roughness=0.28, emission=PALETTE["red"], strength=2.0)
     gold = material("Checkpoint gold", PALETTE["yellow"], metallic=0.58, roughness=0.26)
@@ -296,7 +361,7 @@ def make_factory_kit():
         cube("wall", (0, 0, 0), (0.94, 0.10, 0.42), steel, 0.05),
         cube("conveyor", (0, 0, 0), (0.80, 0.80, 0.08), amber, 0.055),
         cube("express_conveyor", (0, 0, 0), (0.80, 0.80, 0.08), blue, 0.055),
-        torus("gear", (0, 0, 0), 0.28, 0.09, gold),
+        make_gear(gold),
         cube("pusher", (0, 0, 0), (0.56, 0.22, 0.30), amber, 0.055),
         cube("laser", (0, 0, 0), (0.28, 0.42, 0.46), red, 0.055),
         cube("repair", (0, 0, 0), (0.62, 0.62, 0.07), mint, 0.08),

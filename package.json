@@ -3,9 +3,6 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=22.13.0"
-  },
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
@@ -15,7 +12,7 @@
     "typegen": "wrangler types --config dist/server/wrangler.json worker-configuration.d.ts",
     "smoke:production": "node scripts/smoke-production.mjs",
     "verify:production-match": "node --import tsx scripts/verify-production-match.ts",
-    "assets:build": "blender --background --python tools/blender/build_assets.py",
+    "assets:build": "blender --background --python tools/blender/build_assets.py && blender --background --python tools/blender/build_garden.py",
     "assets:validate": "node scripts/validate-assets.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint app components game worker tests scripts ailo.config.ts vite.config.ts playwright.config.ts",
@@ -32,9 +29,9 @@
     "vinext": "1.0.0-beta.5"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
+    "@playwright/test": "1.63.0",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
@@ -47,5 +44,8 @@
     "typescript": "5.9.3",
     "vite": "8.0.13",
     "wrangler": "4.92.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

@@ -24,7 +24,7 @@ npm run test:browser
 ## Art pipeline
 
 The production models are generated from a deterministic Blender script. Blender
-4.5 LTS or newer is recommended.
+4.5 LTS and `cwebp` are required to regenerate assets.
 
 ```bash
 npm run assets:build
@@ -33,8 +33,9 @@ npm run assets:validate
 
 `assets:build` writes editable source scenes to `art/blender/source`, portrait
 masters to `art/blender/renders`, eight individually loadable robot GLBs to
-`public/assets/models/robots`, and the shared modular board kit to
-`public/assets/models/factory-kit.glb`. Runtime portrait WebPs are checked in so
+`public/assets/models/robots`, the shared modular board kit to
+`public/assets/models/factory-kit.glb`, and the greenhouse, plants, lanterns and
+workbench kit to `public/assets/models/garden-kit.glb`. Runtime portrait WebPs are checked in so
 the deployed application does not require Blender. See `docs/art-pipeline.md`
 for animation contracts, ImageGen prompts, and performance budgets.
 

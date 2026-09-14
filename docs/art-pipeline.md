@@ -1,69 +1,72 @@
-# Vibe Robots art pipeline
+# Garden workshop art pipeline
 
-## Direction
+## Art direction
 
-The shipped look is an original, cozy anime-inspired toy diorama: soft cel-like
-forms, warm cream plastics, deep plum structure, peach interaction color, and
-lavender/sage accents. The work deliberately avoids official RoboRally imagery,
-logos, text inside generated art, trademarks, and watermarks.
+An original cozy anime garden workshop: warm ivory paper, sage controls, apricot
+highlights, rounded enamel robots with smiling faces, honey oak board edges,
+terracotta pots, lanterns, workbenches, and a miniature greenhouse. The game
+keeps board symbols and robot headings visible against the softer environment.
 
-The visual identity master is `art/reference/anime-diorama-art-direction.webp`.
-Runtime ImageGen artwork is under `public/assets/images` as WebP fallbacks and
-smaller AVIF sources selected through HTML `picture` elements:
+The launch screen uses `public/assets/images/garden-workshop.webp`. Course cards
+use `garden-course-postcards.webp`, a single three-panel generated illustration
+atlas displayed with CSS background positions. These are decorative course
+illustrations; the live 3D board is the authoritative course layout.
 
-- `vibe-robots-key-art.webp` — wide landing/loading scene
-- `course-risky-exchange.webp` — crossing conveyor course preview
-- `course-dizzy-dash.webp` — circular gear course preview
-- `course-against-the-grain.webp` — long split-lane course preview
+Both images were created with the built-in ImageGen tool. Full prompts and lossless
+masters are saved in `art/reference/garden-workshop-prompts.md`,
+`garden-workshop-key-art.png`, `garden-course-prompts.md`, and
+`garden-course-postcards.png`. The prior art is retained as historical source.
 
-All five images were made with built-in ImageGen. The master prompt specified an
-original eight-character robot lineup, rounded miniature-factory geometry,
-cel-shaded 3D rendering, the plum/cream/peach/lavender/sage palette, a warm
-workshop atmosphere, and a no-text/no-logo/no-watermark constraint. The four
-runtime images then used that master as the identity reference while specifying
-their exact compositions and aspect ratios.
+## Rebuild the assets
 
-## Blender generation
-
-Run:
-
-```bash
+```sh
 npm run assets:build
+npm run assets:validate
 ```
 
-`tools/blender/build_assets.py` creates the modular factory kit and eight unique
-robots. Each robot exports as a separate GLB so a client only fetches occupied
-seats. Every robot contains the shared clip contract:
+Requires Blender 4.5 LTS and `cwebp` on PATH. The scripts generate all runtime
+models and portraits, so neither Blender nor an image generation API is needed
+at build or runtime. `tools/blender/build_assets.py` writes eight robot GLBs,
+eight transparent portrait masters and their WebP versions, and the modular
+board kit. `tools/blender/build_garden.py` writes the five-prop garden kit.
+Editable `.blend` source scenes are saved under `art/blender/source`.
 
-- `idle`
-- `move`
-- `turn`
-- `bump`
-- `hit`
-- `power-down`
-- `respawn`
-- `victory`
+Static robot parts and garden props are joined by material to reduce draw calls.
+RobotRoot owns eight shared animation clips: idle, move, turn, bump, hit,
+power-down, respawn, and victory. Blender front is converted to the game's
+north-facing convention with a presentation-only half-turn wrapper.
 
-Portrait masters are transparent PNG renders in `art/blender/renders`. Runtime
-WebPs live in `public/assets/images/robots`. To refresh them on macOS after an
-asset build:
+## Motion and presentation
 
-```bash
-for source in art/blender/renders/*.png; do
-  cwebp -quiet -q 82 "$source" -o "public/assets/images/robots/$(basename "${source%.png}").webp"
-done
-```
+- Slow idle breathing and swaying keep the robots alive during planning.
+- Board arrows drift gently along conveyor directions; toothed gears turn when
+  the gear stage runs.
+- Moves use short eased translations, heading changes, and a little bounce.
+- Impacts, destruction, checkpoint collection, and respawns emit colored particles.
+- Lasers use a coral beam and bright core; checkpoints and victories play soft
+  synthesized chimes. The sound toggle controls all game audio.
+- The launch art drifts slowly with falling petals. Cards lift on hover, selected
+  registers pop into place, and the finish screen floats the robot portrait.
+- Reduced motion disables ambient motion, camera following, and GLB animation;
+  game events still complete and remain readable. Eco mode omits ambient motion,
+  shadows, and some scenery. Static fixtures disable ambient scene animation for
+  reproducible screenshots.
 
-## Validation and budgets
+The authoritative engine is unchanged. The presentation queue now gives each
+active action its own timer, so changing queue state cannot cancel playback.
+Submitted register cards remain visible while a plan executes.
 
-`npm run assets:validate` checks GLB structure, pivots/bounds, materials, required
-clip names, triangle counts, factory-kit nodes, missing embedded data, image
-weight, and total model payload. Runtime telemetry is exposed as
-`window.__VIBE_PERF__` in development and reports frame, draw-call, and triangle
-counts from Three.js. Static scenes use demand rendering and stop invalidating
-after camera damping and animation settle.
+## Validation
 
-Current delivery budgets are 6 MB for a typical two-player course, 10 MB for the
-eight-player/two-board case, at most 100/140 draw calls respectively, at most
-300k visible triangles, and a 325 KB gzip ceiling for the lazy 3D JavaScript
-chunk.
+`npm run assets:validate` checks ten GLBs, all eight clip names, required board
+and garden nodes, triangle and file-size limits, editable sources, and runtime
+artwork. Total GLB payload remains below 6 MB and each generated runtime image
+is below 700 KB. The renderer exposes frame, call, and triangle counts through
+`window.__VIBE_PERF__` in development. Ambient mode intentionally renders while
+visible; reduced-motion and eco scenes settle back to demand rendering.
+
+`tests/e2e/visual.spec.ts` covers home, lobby, programming, lasers, destruction,
+respawn, victory, solo victory, and defeat at desktop and landscape tablet sizes.
+The solo browser test waits for the visual queue to drain before reconnection,
+in addition to checking authoritative CPU turn resolution. Review screenshots
+are in `artifacts/visual-slice`.
