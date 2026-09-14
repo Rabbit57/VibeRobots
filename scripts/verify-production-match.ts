@@ -93,6 +93,8 @@ try {
     host.waitFor((view) => view.public.robots.every((robot) => robot.connected)),
     guest.waitFor((view) => view.public.robots.every((robot) => robot.connected)),
   ]);
+  await host.command({ type: 'choose-spawn', dock: 7 });
+  await guest.command({ type: 'choose-spawn', dock: 5 });
   await host.command({ type: 'start', courseId: 'risky-exchange', fourLifeRule: false });
   await guest.waitFor((view) => view.public.phase === 'programming');
   await guest.command({ type: 'announce-power-down', enabled: true });

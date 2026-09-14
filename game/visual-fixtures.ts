@@ -1,6 +1,6 @@
 import type { MatchEvent, PrivateMatchView, ProgramCard, PublicRobotView } from './types';
 
-export type VisualMode = 'home' | 'lobby' | 'programming' | 'laser' | 'destruction' | 'respawn' | 'victory' | 'solo-victory' | 'solo-defeat';
+export type VisualMode = 'home' | 'lobby' | 'damage' | 'programming' | 'laser' | 'destruction' | 'respawn' | 'victory' | 'solo-victory' | 'solo-defeat';
 
 export interface VisualFixture {
   mode: VisualMode;
@@ -49,7 +49,7 @@ function event(type: string, message: string, extra: Partial<MatchEvent>): Match
 
 export function makeVisualFixture(candidate: string): VisualFixture | undefined {
   const mode = candidate as VisualMode;
-  if (!['home', 'lobby', 'programming', 'laser', 'destruction', 'respawn', 'victory', 'solo-victory', 'solo-defeat'].includes(mode)) return;
+  if (!['home', 'lobby', 'damage', 'programming', 'laser', 'destruction', 'respawn', 'victory', 'solo-victory', 'solo-defeat'].includes(mode)) return;
   if (mode === 'home') return { mode, screen: 'home' };
   const ada = robot('ada', 'hammer-bot', 'Ada', 3, 8);
   const grace = robot('grace', 'twitch', 'Grace', 8, 6);
@@ -75,6 +75,15 @@ export function makeVisualFixture(candidate: string): VisualFixture | undefined 
     return { mode, screen: 'match', view: result };
   }
   if (mode === 'lobby') return { mode, screen: 'lobby', view: view('lobby', [ada, grace]) };
+  if (mode === 'damage') {
+    ada.damage = 7;
+    ada.lives = 2;
+    ada.registers = Array.from({ length: 5 }, (_, index) => ({ card: index >= 2 ? cards[index] : null, locked: index >= 2 }));
+    grace.finishedProgramming = true;
+    const result = view('programming', [ada, grace]);
+    result.hand = cards.slice(0, 2);
+    return { mode, screen: 'match', view: result };
+  }
   if (mode === 'programming') return { mode, screen: 'match', view: view('programming', [ada, grace]) };
   if (mode === 'laser') {
     const activeEvent = event('laser-fired', 'A warm little laser crosses the factory.', { source: 'factory-laser', path: [{ x: 3, y: 6 }, { x: 8, y: 6 }], to: { x: 8, y: 6 } });

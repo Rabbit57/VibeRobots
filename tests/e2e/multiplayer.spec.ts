@@ -23,6 +23,10 @@ test('two players create, join, start, program, and reconnect', async ({ browser
   await expect(guest.locator('.lobby-panel')).toBeVisible();
   await expect(host.locator('.seat:not(.empty)')).toHaveCount(2, { timeout: 30_000 });
   await expect(host.getByText('Grace', { exact: true })).toBeVisible();
+  await expect(host.getByRole('button', { name: /start the diorama/i })).toBeDisabled();
+  await host.getByRole('button', { name: /^choose dock 7$/i }).click();
+  await expect(guest.getByRole('button', { name: /choose dock 7/i })).toBeDisabled();
+  await guest.getByRole('button', { name: /^choose dock 5$/i }).click();
   await host.getByRole('button', { name: /start the diorama/i }).click();
   await expect(host.getByText('YOUR FIVE-STEP PLAN')).toBeVisible();
   await expect(guest.getByText('YOUR FIVE-STEP PLAN')).toBeVisible();
@@ -31,6 +35,10 @@ test('two players create, join, start, program, and reconnect', async ({ browser
     const cards = page.locator('.program-card');
     for (let index = 0; index < 5; index += 1) await cards.nth(index).click();
     await page.getByRole('button', { name: /lock in 5\/5/i }).click();
+    if (page === host) {
+      await expect(guest.locator('.ready-countdown')).toBeVisible();
+      await expect(guest.locator('.roster-panel .ready-badge.is-ready')).toHaveText('✓ READY');
+    }
   }
   await expect.poll(async () => {
     const states = await Promise.all([host, guest].map((page) => page.evaluate(() => {
@@ -48,6 +56,8 @@ test('two players create, join, start, program, and reconnect', async ({ browser
       events: match.events.filter((event) => event.public).map(({ revision, type }) => ({ revision, type })),
     };
   });
+  await expect(host.getByRole("button", { name: "Skip to end of turn" })).toHaveCount(0);
+  await expect(guest.getByRole("button", { name: "Skip to end of turn" })).toHaveCount(0);
   const [hostResult, guestResult] = await Promise.all([publicResult(host), publicResult(guest)]);
   expect(hostResult).toEqual(guestResult);
   await host.reload();

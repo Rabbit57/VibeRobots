@@ -10,6 +10,7 @@ const card = (priority: number) => PROGRAM_DECK.find((candidate) => candidate.pr
 function solo(seed = 91) {
   const state = createLobby('SOLOBOTS91', { seatId: 'human', robotId: 'hammer-bot', displayName: 'Ada', connected: true }, 1, seed, 'solo');
   addSoloBots(state);
+  state.robots.filter((robot) => robot.controller === 'human').forEach((robot, index) => applyCommand(state, robot.seatId, { type: 'choose-spawn', id: `dock-${index}`, revision: state.revision, dock: [7, 5][index] }, 1));
   applyCommand(state, 'human', { type: 'start', id: 'start', revision: state.revision, courseId: 'risky-exchange', fourLifeRule: false }, 2);
   return state;
 }

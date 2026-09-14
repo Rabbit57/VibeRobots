@@ -6,6 +6,7 @@ import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import * as THREE from "three";
 import { courseBounds, courseTile } from "@/game/content/boards";
 import { ROBOT_BY_ID } from "@/game/content/robots";
+import { GEAR_COLORS } from "@/game/board-visuals";
 import { directionAngle, shortestAngle, motionProgress } from "@/game/presentation";
 import type { CourseDefinition, MatchEvent, PublicRobotView } from "@/game/types";
 
@@ -48,7 +49,10 @@ const boardEvents: typeof createPointerEvents = (store) => ({
   ...createPointerEvents(store),
   compute(event, state) {
     const rect = state.gl.domElement.getBoundingClientRect();
-    state.pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    state.pointer.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
     state.raycaster.setFromCamera(state.pointer, state.camera);
   },
 });
@@ -180,10 +184,7 @@ function SceneContent({
       </group>
       <AmbientLife enabled={!reducedMotion && ambientMotion && quality !== "eco"} bounds={bounds} />
       <group position={[offset.x, 0, offset.z]}>
-        <FactoryBoard
-          course={course}
-          onInspect={onInspect}
-        />
+        <FactoryBoard course={course} onInspect={onInspect} />
         <RobotFleet
           robots={robots}
           activeEvent={activeEvent}
@@ -248,8 +249,7 @@ function FactoryBoard({
           color: tile.conveyor.speed === 2 ? "#4aaddb" : "#e9ac4c",
           rotation: directionAngle(tile.conveyor.direction),
         });
-      if (tile?.gear)
-        gears.push({ x, z: y, y: 0.16, rotation: tile.gear === "right" ? 0 : Math.PI });
+      if (tile?.gear) gears.push({ x, z: y, y: 0.16, color: GEAR_COLORS[tile.gear], rotation: 0 });
       if (tile?.pusher)
         pushers.push({ x, z: y, y: 0.18, rotation: directionAngle(tile.pusher.direction) });
       if (tile?.laser)
@@ -297,11 +297,7 @@ function FactoryBoard({
       <Instances node={node("wall")} items={features.walls} castShadow />
       <Instances node={node("conveyor")} items={features.conveyors} />
       <Instances node={node("express_conveyor")} items={features.express} />
-      <Instances
-        node={node("gear")}
-        items={features.gears}
-        castShadow
-      />
+      <Instances node={node("gear")} items={features.gears} castShadow />
       <Instances node={node("pusher")} items={features.pushers} castShadow />
       <Instances node={node("repair")} items={features.repairs} />
 
@@ -420,7 +416,13 @@ function CheckpointFlags({ items }: { items: Array<Instance & { number: number }
             <meshStandardMaterial color="#fff0b4" metalness={0.4} roughness={0.3} />
           </mesh>
           <Html position={[0.28, 1.28, 0.24]} center zIndexRange={[7, 0]}>
-            <div className="checkpoint-label" data-help-title={`Checkpoint ${item.number}`} data-help="Visit numbered checkpoints in order. Stay on this square through the laser stage to collect it and save your archive.">{item.number}</div>
+            <div
+              className="checkpoint-label"
+              data-help-title={`Checkpoint ${item.number}`}
+              data-help="Visit numbered checkpoints in order. Stay on this square through the laser stage to collect it and save your archive."
+            >
+              {item.number}
+            </div>
           </Html>
         </group>
       ))}

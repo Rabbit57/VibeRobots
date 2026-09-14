@@ -178,6 +178,7 @@ export function VibeRobotsGame({ title }: { title: string }) {
       };
       if (payload.view) {
         setView(payload.view);
+        if (payload.view.public.phase === "lobby") setCourseId(payload.view.public.courseId);
         setScreen(payload.view.public.phase === "lobby" ? "lobby" : "match");
         setError("");
       }
@@ -453,11 +454,13 @@ export function VibeRobotsGame({ title }: { title: string }) {
         <div className={`status-strip ${publicState?.phase === "paused" ? "is-paused" : ""}`}>
           <i className={publicState?.phase === "paused" ? "amber" : ""} />
           <span>
-            {publicState?.phase === "paused" ? "Paused · reconnecting" : playback.playing
-              ? playbackLabel(playback.active?.event)
-              : publicState
-                ? phaseLabel(publicState.phase)
-                : "Workshop ready"}
+            {publicState?.phase === "paused"
+              ? "Paused · reconnecting"
+              : playback.playing
+                ? playbackLabel(playback.active?.event)
+                : publicState
+                  ? phaseLabel(publicState.phase)
+                  : "Workshop ready"}
           </span>
         </div>
         <nav className="top-actions" aria-label="Presentation settings">
@@ -525,12 +528,17 @@ export function VibeRobotsGame({ title }: { title: string }) {
               course={selectedCourse}
               robots={
                 screen === "lobby"
-                  ? playback.robots.map((robot, index) => ({
-                      ...robot,
-                      position: selectedCourse.docks[index % selectedCourse.docks.length],
-                      direction:
-                        selectedCourse.docks[index % selectedCourse.docks.length].direction,
-                    }))
+                  ? playback.robots
+                      .filter((robot) => robot.spawnDock)
+                      .map((robot) => ({
+                        ...robot,
+                        position: selectedCourse.docks.find(
+                          (dock) => dock.number === robot.spawnDock,
+                        )!,
+                        direction: selectedCourse.docks.find(
+                          (dock) => dock.number === robot.spawnDock,
+                        )!.direction,
+                      }))
                   : playback.robots
               }
               activeEvent={playback.active?.event}
@@ -601,9 +609,13 @@ export function VibeRobotsGame({ title }: { title: string }) {
           roomCode={roomCode || view.public.roomCode}
           isHost={isHost}
           courseId={courseId}
-          setCourseId={setCourseId}
+          setCourseId={(courseId) => {
+            setCourseId(courseId);
+            send("choose-course", { courseId });
+          }}
           fourLives={fourLives}
           setFourLives={setFourLives}
+          chooseSpawn={(dock) => send("choose-spawn", { dock })}
           start={() => send("start", { courseId, fourLifeRule: fourLives })}
           error={error}
         />
@@ -686,6 +698,15 @@ function usePresentationPlayback(
   const finalRobots = useRef<PublicRobotView[]>([]);
   const seenConnectionEpoch = useRef(-1);
 
+  const skipToEnd = useCallback(() => {
+    if (!view || view.public.mode !== "solo") return;
+    const reset = resetPresentation(view.public.robots, view.public.eventRevision);
+    acknowledge(undefined);
+    lastQueued.current = reset.queue.lastRevision;
+    finalRobots.current = view.public.robots;
+    setState({ robots: reset.robots, queue: [] });
+  }, [view]);
+
   useEffect(() => {
     if (!view) {
       acknowledge(undefined);
@@ -742,6 +763,7 @@ function usePresentationPlayback(
     false;
   return {
     onPresented: acknowledge,
+    skipToEnd: view?.public.mode === "solo" ? skipToEnd : undefined,
     presented: presentedRevision === state.active?.event.revision,
     robots: state.robots,
     active: state.active ? { ...state.active, durationMs } : undefined,

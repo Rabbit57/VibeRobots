@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. Start a solo race, or create an online room in one browser context and join its invite URL in another.
+Open `http://localhost:3000`. Start a solo race, or create an online room in one browser context and join its invite URL in another. Every human player chooses an available starting dock in the lobby; solo CPU robots use remaining docks. Course changes update for everyone. In multiplayer, the last player still programming gets a shared 30-second countdown that pauses during disconnection. Solo play stays untimed. During solo playback, Skip to end immediately shows the resolved board and next hand.
 
 ## Checks
 

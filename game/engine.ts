@@ -121,7 +121,9 @@ export function applyCommand(state: MatchState, seatId: string, command: MatchCo
 
   const events: MatchEvent[] = [];
   if (command.type === 'start') startMatch(state, seatId, command.courseId, command.fourLifeRule, events);
-  else if (command.type === 'program') submitProgram(state, seatId, command.cards, events);
+  else if (command.type === 'choose-spawn') chooseSpawn(state, seatId, command.dock, events);
+  else if (command.type === 'choose-course') chooseCourse(state, seatId, command.courseId, events);
+  else if (command.type === 'program') submitProgram(state, seatId, command.cards, events, now);
   else if (command.type === 'announce-power-down') announcePowerDown(state, seatId, command.enabled, events);
   else if (command.type === 'stay-powered-down') stayPoweredDown(state, seatId, command.enabled, events);
   else if (command.type === 'option') activateOption(state, seatId, command.optionId, command.payload ?? {}, events);
@@ -131,6 +133,36 @@ export function applyCommand(state: MatchState, seatId: string, command: MatchCo
   state.updatedAt = now;
   state.recentCommandIds = [...state.recentCommandIds.slice(-127), command.id];
   return { state, events: finalizeEvents(state, events) };
+}
+
+function chooseCourse(state: MatchState, seatId: string, courseId: string, events: MatchEvent[]) {
+  if (state.phase !== 'lobby') throw new RuleError('out-of-turn', 'The course cannot change during a race.');
+  if (state.hostSeatId !== seatId) throw new RuleError('unauthorized', 'Only the host can choose the course.');
+  const course = COURSE_BY_ID.get(courseId);
+  if (!course) throw new RuleError('illegal', 'Unknown course.');
+  state.courseId = courseId;
+  for (const robot of state.robots) {
+    const dock = course.docks.find((candidate) => candidate.number === robot.spawnDock);
+    if (dock) {
+      robot.position = { x: dock.x, y: dock.y };
+      robot.archive = { ...robot.position };
+      robot.direction = dock.direction;
+    } else robot.spawnDock = undefined;
+  }
+  events.push(event('course-chosen', `The crew will race on ${course.name}.`));
+}
+
+function chooseSpawn(state: MatchState, seatId: string, dockNumber: number, events: MatchEvent[]) {
+  if (state.phase !== 'lobby') throw new RuleError('out-of-turn', 'Starting docks can only be chosen before the race.');
+  const dock = requireCourse(state).docks.find((candidate) => candidate.number === dockNumber);
+  if (!dock) throw new RuleError('illegal', 'Choose a marked starting dock.');
+  if (state.robots.some((robot) => robot.seatId !== seatId && robot.spawnDock === dockNumber)) throw new RuleError('illegal', 'That starting dock is already taken.');
+  const robot = robotFor(state, seatId);
+  robot.spawnDock = dockNumber;
+  robot.position = { x: dock.x, y: dock.y };
+  robot.archive = { ...robot.position };
+  robot.direction = dock.direction;
+  events.push(event('spawn-chosen', `${robot.displayName} chose dock ${dockNumber}.`, robot));
 }
 
 function startMatch(state: MatchState, seatId: string, courseId: string, fourLifeRule: boolean, events: MatchEvent[]) {
@@ -143,14 +175,17 @@ function startMatch(state: MatchState, seatId: string, courseId: string, fourLif
   const course = COURSE_BY_ID.get(courseId);
   if (!course) throw new RuleError('illegal', 'Unknown course.');
   if (fourLifeRule && state.robots.length < 5) throw new RuleError('illegal', 'The four-life rule is available with five or more players.');
+  if (state.robots.some((robot) => robot.controller === 'human' && !robot.spawnDock)) throw new RuleError('illegal', 'Every player must choose a starting dock.');
 
   state.courseId = courseId;
   state.fourLifeRule = fourLifeRule;
-  state.dockingOrder = shuffled(state.robots.map((robot) => robot.seatId), state);
+  const available = course.docks.filter((dock) => !state.robots.some((robot) => robot.spawnDock === dock.number));
+  for (const robot of state.robots) if (!robot.spawnDock) robot.spawnDock = available.shift()!.number;
+  state.dockingOrder = [...state.robots].sort((a, b) => a.spawnDock! - b.spawnDock!).map((robot) => robot.seatId);
   state.programDeck = shuffled(PROGRAM_DECK, state);
   state.optionDeck = shuffled(OPTION_CARDS.map((option) => option.id), state);
-  state.robots.forEach((robot, index) => {
-    const dock = course.docks[index];
+  state.robots.forEach((robot) => {
+    const dock = course.docks.find((candidate) => candidate.number === robot.spawnDock)!;
     robot.position = { x: dock.x, y: dock.y };
     robot.archive = { ...robot.position };
     robot.direction = dock.direction;
@@ -161,7 +196,7 @@ function startMatch(state: MatchState, seatId: string, courseId: string, fourLif
   events.push(event('match-started', `${state.robots.length} robots entered ${course.name}.`));
 }
 
-function submitProgram(state: MatchState, seatId: string, cardIds: string[], events: MatchEvent[]) {
+function submitProgram(state: MatchState, seatId: string, cardIds: string[], events: MatchEvent[], now: number) {
   if (state.phase !== 'programming') throw new RuleError('out-of-turn', 'Programs cannot be submitted now.');
   const robot = robotFor(state, seatId);
   if (robot.eliminated || robot.destroyed || robot.poweredDown) throw new RuleError('out-of-turn', 'This robot is not programming this turn.');
@@ -177,8 +212,24 @@ function submitProgram(state: MatchState, seatId: string, cardIds: string[], eve
 
   const active = state.robots.filter((candidate) => !candidate.eliminated && !candidate.destroyed && !candidate.poweredDown);
   const unfinished = active.filter((candidate) => !candidate.finishedProgramming);
-  state.timerDeadline = unfinished.length === 1 ? Date.now() + 30_000 : undefined;
+  if (state.mode === 'multiplayer' && unfinished.length === 1 && !state.timerDeadline) state.timerDeadline = now + 30_000;
   if (unfinished.length === 0) resolveTurn(state, events);
+}
+
+/** One shared deadline fills every unfinished program, then resolves exactly one turn. */
+export function expireProgrammingTimer(state: MatchState, now = Date.now()): CommandResult {
+  const events: MatchEvent[] = [];
+  if (state.mode !== 'multiplayer' || state.phase !== 'programming' || !state.timerDeadline || now < state.timerDeadline) return { state, events };
+  const unfinished = state.robots.filter((robot) => !robot.finishedProgramming && !robot.eliminated && !robot.destroyed && !robot.poweredDown);
+  for (const robot of unfinished) {
+    const count = robot.registers.filter((register) => !register.locked).length;
+    const cards = shuffled(state.hands[robot.seatId] ?? [], state).slice(0, count).map((card) => card.id);
+    events.push(event('timer-expired', `${robot.displayName}'s program was filled at random when time ran out.`, robot));
+    submitProgram(state, robot.seatId, cards, events, now);
+  }
+  state.revision += 1;
+  state.updatedAt = now;
+  return { state, events: finalizeEvents(state, events) };
 }
 
 function announcePowerDown(state: MatchState, seatId: string, enabled: boolean, events: MatchEvent[]) {
@@ -212,6 +263,7 @@ function resolveDecision(state: MatchState, seatId: string, choice: string, even
 export function resolveTurn(state: MatchState, events: MatchEvent[] = []): MatchEvent[] {
   const course = requireCourse(state);
   state.phase = 'executing';
+  state.timerDeadline = undefined;
   for (let registerIndex = 0; registerIndex < 5; registerIndex += 1) {
     state.registerIndex = registerIndex;
     const movers = liveRobots(state)
@@ -219,7 +271,7 @@ export function resolveTurn(state: MatchState, events: MatchEvent[] = []): Match
       .sort((a, b) => b.registers[registerIndex].card!.priority - a.registers[registerIndex].card!.priority);
     const stage = (id: MatchEvent['stage'], message: string) => events.push({ ...event('stage', message), register: registerIndex + 1, stage: id });
     stage('program', `Register ${registerIndex + 1}: robots execute cards in priority order.`);
-    for (const robot of movers) executeProgram(state, course, robot, robot.registers[registerIndex].card!, events);
+    for (const robot of movers) if (!robot.destroyed && !robot.eliminated) executeProgram(state, course, robot, robot.registers[registerIndex].card!, events);
     stage('express-conveyor', 'Express belts take their extra step.');
     moveConveyors(state, course, 2, true, events);
     stage('conveyor', 'All conveyor belts advance one square.');
@@ -269,22 +321,23 @@ function executeProgram(state: MatchState, course: CourseDefinition, robot: Robo
   for (let i = 0; i < steps && !robot.destroyed; i += 1) moveRobot(state, course, robot, direction, events, 'program');
 }
 
-function moveRobot(state: MatchState, course: CourseDefinition, robot: RobotState, direction: Direction, events: MatchEvent[], source: string): boolean {
+function moveRobot(state: MatchState, course: CourseDefinition, robot: RobotState, direction: Direction, events: MatchEvent[], source: string, movementStage?: MatchEvent['stage']): boolean {
   if (robot.destroyed || robot.eliminated || blockedByWall(course, robot.position, direction)) return false;
   const vector = VECTORS[direction];
   const destination = { x: robot.position.x + vector.x, y: robot.position.y + vector.y };
   const occupant = robotAt(state, destination, robot.seatId);
-  if (occupant && !moveRobot(state, course, occupant, direction, events, 'push')) return false;
+  const inheritedStage = movementStage ?? (source === 'pusher' ? 'pushers' : 'program');
+  if (occupant && !moveRobot(state, course, occupant, direction, events, 'push', inheritedStage)) return false;
   const from = { ...robot.position };
   robot.position = destination;
   const movementType = source === 'program' ? 'move' : source === 'express-conveyor' ? 'conveyor' : source;
-  const stage: MatchEvent['stage'] = source === 'program' || source === 'push'
+  const stage: MatchEvent['stage'] = movementStage ?? (source === 'program' || source === 'push'
     ? 'program'
     : source === 'express-conveyor'
       ? 'express-conveyor'
       : source === 'conveyor'
       ? 'conveyor'
-      : 'pushers';
+      : 'pushers');
   events.push({ ...event(movementType, `${robot.displayName} moved.`, robot), register: state.registerIndex + 1, stage, source, from, to: { ...destination }, path: [from, { ...destination }], fromDirection: robot.direction, toDirection: robot.direction });
   if (hasOption(robot, 'ramming-gear') && occupant) takeDamage(occupant, 1, events, 'Ramming Gear');
   if (!insideCourse(course, destination) || courseTile(course, destination.x, destination.y)?.pit) destroyRobot(robot, events, 'factory hazard');
@@ -292,29 +345,58 @@ function moveRobot(state: MatchState, course: CourseDefinition, robot: RobotStat
 }
 
 function moveConveyors(state: MatchState, course: CourseDefinition, speed: 1 | 2, expressOnly: boolean, events: MatchEvent[]) {
-  const candidates = liveRobots(state).filter((robot) => {
-    const conveyor = courseTile(course, robot.position.x, robot.position.y)?.conveyor;
-    return conveyor && (expressOnly ? conveyor.speed === 2 : conveyor.speed >= speed);
+  // Snapshot all intentions before moving anyone. Belts never push robots.
+  const live = liveRobots(state);
+  const moves = live.flatMap((robot) => {
+    const belt = courseTile(course, robot.position.x, robot.position.y)?.conveyor;
+    if (!belt || (expressOnly ? belt.speed !== 2 : belt.speed < speed) || blockedByWall(course, robot.position, belt.direction)) return [];
+    const from = { ...robot.position };
+    return [{ robot, belt, from, to: { x: from.x + VECTORS[belt.direction].x, y: from.y + VECTORS[belt.direction].y } }];
   });
-  for (const robot of orderByDock(state, candidates)) {
-    const conveyor = courseTile(course, robot.position.x, robot.position.y)?.conveyor;
-    if (!conveyor) continue;
-    if (moveRobot(state, course, robot, conveyor.direction, events, expressOnly ? 'express-conveyor' : 'conveyor')) {
-      const landed = courseTile(course, robot.position.x, robot.position.y)?.conveyor;
-      if (landed?.rotate && robot.optionState.gyroscopicStabilizer !== true) {
-        const fromDirection = robot.direction;
-        turnRobot(robot, landed.rotate === 'right' ? 1 : -1);
-        events.push({ ...event('turn', `${robot.displayName} turned ${landed.rotate} with the belt.`, robot), register: state.registerIndex + 1,
-          stage: expressOnly ? 'express-conveyor' : 'conveyor', source: 'conveyor-bend', fromDirection, toDirection: robot.direction, to: { ...robot.position } });
+  const blocked = new Set<string>();
+  for (const move of moves) {
+    if (moves.some((other) => other !== move && samePosition(other.to, move.to))) blocked.add(move.robot.seatId);
+    // Head-on swaps are collisions, not passes through each other.
+    if (moves.some((other) => other !== move && samePosition(other.to, move.from) && samePosition(other.from, move.to))) blocked.add(move.robot.seatId);
+  }
+  // A stopped robot also stops every belt feeding into its occupied square.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const move of moves) {
+      if (blocked.has(move.robot.seatId)) continue;
+      const occupant = live.find((robot) => samePosition(robot.position, move.to));
+      if (occupant && (!moves.some((other) => other.robot === occupant) || blocked.has(occupant.seatId))) {
+        blocked.add(move.robot.seatId);
+        changed = true;
       }
+    }
+  }
+  const stage = expressOnly ? 'express-conveyor' : 'conveyor';
+  for (const { robot, belt, from, to } of moves) {
+    if (blocked.has(robot.seatId)) continue;
+    robot.position = to;
+    events.push({ ...event('conveyor', `${robot.displayName} rode the belt ${belt.direction}.`, robot), register: state.registerIndex + 1, stage, source: stage, from, to: { ...to }, path: [from, { ...to }], fromDirection: robot.direction, toDirection: robot.direction });
+    if (!insideCourse(course, to) || courseTile(course, to.x, to.y)?.pit) {
+      destroyRobot(robot, events, 'factory hazard');
+      continue;
+    }
+    const landed = courseTile(course, to.x, to.y)?.conveyor;
+    // At a merge, entering along the straight branch must not rotate the robot.
+    const delta = landed ? (DIRECTIONS.indexOf(landed.direction) - DIRECTIONS.indexOf(belt.direction) + 4) % 4 : 0;
+    if (landed?.rotate && (delta === 1 || delta === 3) && robot.optionState.gyroscopicStabilizer !== true) {
+      const fromDirection = robot.direction;
+      turnRobot(robot, delta === 1 ? 1 : -1);
+      events.push({ ...event('turn', `${robot.displayName} turned ${delta === 1 ? 'right' : 'left'} with the belt.`, robot), register: state.registerIndex + 1,
+        stage, source: 'conveyor-bend', fromDirection, toDirection: robot.direction, to: { ...to } });
     }
   }
 }
 
 function activatePushers(state: MatchState, course: CourseDefinition, register: number, events: MatchEvent[]) {
-  for (const robot of orderByDock(state, liveRobots(state))) {
-    const pusher = courseTile(course, robot.position.x, robot.position.y)?.pusher;
-    if (pusher?.activeRegisters.includes(register)) moveRobot(state, course, robot, pusher.direction, events, 'pusher');
+  const active = orderByDock(state, liveRobots(state)).map((robot) => ({ robot, from: { ...robot.position }, pusher: courseTile(course, robot.position.x, robot.position.y)?.pusher }));
+  for (const { robot, from, pusher } of active) {
+    if (pusher?.activeRegisters.includes(register) && samePosition(robot.position, from)) moveRobot(state, course, robot, pusher.direction, events, 'pusher');
   }
 }
 
@@ -365,6 +447,8 @@ function traceLaser(state: MatchState, course: CourseDefinition, origin: Positio
   const hits: RobotState[] = [];
   const path: Position[] = [{ ...origin }];
   let position = { ...origin };
+  const atEmitter = !ignoreSeat && robotAt(state, origin);
+  if (atEmitter) return { hits: [atEmitter], path };
   for (let guard = 0; guard < 32; guard += 1) {
     if (blockedByWall(course, position, direction)) {
       if (penetration <= 0) break;
@@ -415,8 +499,7 @@ function finishSoloDefeat(state: MatchState, events: MatchEvent[]) {
 
 function cleanup(state: MatchState, course: CourseDefinition, events: MatchEvent[]) {
   for (const robot of state.robots) {
-    if (robot.destroyed && !robot.eliminated) respawnRobot(state, course, robot, events);
-    if (robot.eliminated) continue;
+    if (robot.destroyed || robot.eliminated) continue;
     const cleanupTile = courseTile(course, robot.position.x, robot.position.y);
     const repair = cleanupTile?.repair;
     if (repair) {
@@ -428,12 +511,17 @@ function cleanup(state: MatchState, course: CourseDefinition, events: MatchEvent
         events.push({ ...event('option-acquired', `${robot.displayName} installed ${definition.name}.`, robot), stage: 'cleanup', to: { ...robot.position }, source: 'option-site' });
       }
     }
+  }
+  // Reset every surviving replacement as well, without granting it a site reward.
+  for (const robot of orderByDock(state, state.robots)) {
+    if (robot.destroyed && !robot.eliminated) respawnRobot(state, course, robot, events);
+    if (robot.destroyed || robot.eliminated) continue;
     updateLockedRegisters(robot);
     const flywheelCard = robot.optionState.flywheelCard as string | undefined;
     if (flywheelCard && robot.registers.some((register) => register.card?.id === flywheelCard)) delete robot.optionState.flywheelCard;
     robot.optionState = robot.optionState.flywheelCard ? { flywheelCard: robot.optionState.flywheelCard } : {};
     if (robot.poweredDown) robot.poweredDown = robot.powerDownNext;
-    else if (robot.powerDownNext) {
+    if (robot.powerDownNext) {
       robot.poweredDown = true;
       robot.damage = 0;
       robot.registers.forEach((register) => { register.locked = false; register.card = null; });
@@ -672,7 +760,7 @@ function robotAt(state: MatchState, position: Position, ignoreSeat?: string) { r
 function samePosition(a: Position, b: Position) { return a.x === b.x && a.y === b.y; }
 function manhattan(a: Position, b: Position) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
 function hasOption(robot: RobotState, id: string) { return robot.options.some((option) => option.id === id); }
-function insideCourse(course: CourseDefinition, position: Position) { return course.boards.some((placement) => { const board = courseTile(course, position.x, position.y); return Boolean(board) && position.x >= placement.offset.x && position.x < placement.offset.x + 12 && position.y >= placement.offset.y && position.y < placement.offset.y + 12; }); }
+function insideCourse(course: CourseDefinition, position: Position) { return courseTile(course, position.x, position.y) !== undefined; }
 function blockedByWall(course: CourseDefinition, position: Position, direction: Direction) {
   const destination = { x: position.x + VECTORS[direction].x, y: position.y + VECTORS[direction].y };
   return Boolean(courseTile(course, position.x, position.y)?.walls?.includes(direction) || courseTile(course, destination.x, destination.y)?.walls?.includes(OPPOSITE[direction]));

@@ -94,6 +94,7 @@ test("a live robot travels smoothly at the slower default pace", async ({ page }
   test.setTimeout(180_000);
   await page.goto("/");
   await page.getByRole("button", { name: /play solo/i }).click();
+  await page.getByRole("button", { name: /^choose dock 7$/i }).click();
   await page.getByRole("button", { name: /start the diorama/i }).click();
   await expect(page.locator(".factory-viewport")).toHaveClass(/scene-ready/);
   for (let i = 0; i < 5; i++) await page.locator(".program-card").nth(i).click();
@@ -156,4 +157,19 @@ test("a live robot travels smoothly at the slower default pace", async ({ page }
   await expect(page.locator(".game-root")).toHaveAttribute("data-playback", "idle", {
     timeout: 120_000,
   });
+});
+
+
+test("damage tokens, locked programs and lives are explicit", async ({ page }) => {
+  await page.goto("/?visual=damage");
+  await expect(page.locator(".robot-health .life-hearts")).toHaveAttribute("aria-label", "2 of 3 lives");
+  await expect(page.locator(".damage-tokens .hit")).toHaveCount(7);
+  await expect(page.locator(".register.locked")).toHaveCount(3);
+  await expect(page.locator(".register.locked .lock").first()).toContainText("LOCKED");
+  await expect(page.locator(".damage-consequences")).toContainText("3 registers locked");
+  await expect(page.locator(".roster-panel .ready-badge.is-ready")).toHaveText("✓ READY");
+  await expect(page.locator(".programming-status strong")).toHaveText("1 / 2 READY");
+  await page.locator(".program-card").nth(0).click();
+  await page.locator(".program-card").nth(1).click();
+  await expect(page.getByRole("button", { name: /lock in 2\/2/i })).toBeEnabled();
 });

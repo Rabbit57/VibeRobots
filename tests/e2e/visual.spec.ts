@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const states = ['home', 'lobby', 'programming', 'laser', 'destruction', 'respawn', 'victory', 'solo-victory', 'solo-defeat'] as const;
+const states = ['home', 'lobby', 'programming', 'damage', 'laser', 'destruction', 'respawn', 'victory', 'solo-victory', 'solo-defeat'] as const;
 
 test.describe('deterministic presentation gallery', () => {
   for (const state of states) {

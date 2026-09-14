@@ -12,6 +12,7 @@ const p = (priority: number) => PROGRAM_DECK.find((card) => card.priority === pr
 function started(courseId = 'risky-exchange', seed = 57) {
   const state = createLobby('TESTROOM57', { seatId: 'seat-a', robotId: 'hammer-bot', displayName: 'Ada', connected: true }, 1, seed);
   addSeat(state, { seatId: 'seat-b', robotId: 'hulk-x90', displayName: 'Grace', connected: true });
+  state.robots.filter((robot) => robot.controller === 'human').forEach((robot, index) => applyCommand(state, robot.seatId, { type: 'choose-spawn', id: `dock-${index}`, revision: state.revision, dock: [7, 5][index] }, 1));
   applyCommand(state, 'seat-a', { type: 'start', id: 'start', revision: state.revision, courseId, fourLifeRule: false }, 2);
   return state;
 }
@@ -193,11 +194,11 @@ describe('authority, redaction, and deterministic replay', () => {
     assert.throws(() => applyCommand(state, 'seat-a', { type: 'program', id: 'again', revision: state.revision, cards: [] }), (error: unknown) => error instanceof RuleError && error.category === 'duplicate');
   });
 
-  // Includes explicit stage announcements and the respawn repair snapshot.
+  // Includes chosen docks, corrected board physics and the respawn repair snapshot.
   const expectedGolden: Record<string, string> = {
-    'risky-exchange': '15bbb00e71b8f840',
-    'dizzy-dash': '60bab3f09002cdd7',
-    'against-the-grain': '5e7547a0003f12e5',
+    'risky-exchange': '67dd030b14cca65e',
+    'dizzy-dash': '0a76d95664e7b958',
+    'against-the-grain': 'bde758716ad838a7',
   };
   for (const course of COURSES) test(`golden deterministic replay: ${course.name}`, () => {
     const replay = () => {

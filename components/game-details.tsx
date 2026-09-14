@@ -1,5 +1,7 @@
 "use client";
 
+import { GEAR_COLORS, GEAR_OUTLINE, GEAR_ARROW_ARC, GEAR_ARROW_HEAD } from "@/game/board-visuals";
+
 import { useEffect, useRef, useState } from "react";
 import { courseBounds, courseTile } from "@/game/content/boards";
 import { robotInspection, tileInspection, TURN_STAGES, type Inspection } from "@/game/inspection";
@@ -66,6 +68,46 @@ export function ProgramArt({ kind }: { kind: ProgramKind }) {
   );
 }
 
+function GearSymbol({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg viewBox="0 0 256 256" aria-hidden="true" className="gear-symbol">
+      <path
+        d={GEAR_OUTLINE}
+        fill="#c3c6ae"
+        stroke="#35483e"
+        strokeWidth="5"
+        strokeLinejoin="round"
+      />
+      <circle
+        cx="128"
+        cy="128"
+        r="95"
+        fill={GEAR_COLORS[direction]}
+        stroke="#35483e"
+        strokeWidth="5"
+      />
+      <g transform={direction === "left" ? "translate(256 0) scale(-1 1)" : undefined}>
+        {[0, 180].map((angle) => (
+          <g key={angle} transform={`rotate(${angle} 128 128)`}>
+            <path
+              d={GEAR_ARROW_ARC}
+              fill="none"
+              stroke="#fffbea"
+              strokeWidth="18"
+              strokeLinecap="round"
+            />
+            <path d={GEAR_ARROW_HEAD} fill="#fffbea" />
+          </g>
+        ))}
+      </g>
+      <circle cx="128" cy="128" r="29" fill="#35483e" />
+      <text x="128" y="137" textAnchor="middle" fill="#fffbea" fontSize="23" fontWeight="700">
+        90°
+      </text>
+    </svg>
+  );
+}
+
 export function TurnTimeline({ playback }: { playback: PlaybackView }) {
   const stage = playback.active?.event.stage ?? "program";
   const current = TURN_STAGES.findIndex((item) => item.id === stage);
@@ -128,7 +170,13 @@ export function BoardLegend() {
           "Express · 2×",
           "Blue express belts move in two stages, up to two squares per register. Double arrows and 2× markings identify them.",
         ],
-        ["gear", "↻", "Gear", "Turn 90° in the direction marked on the gear."],
+        ["gear-right", "↻", "Clockwise", "Orange gears turn your robot 90° clockwise (right)."],
+        [
+          "gear-left",
+          "↺",
+          "Counterclockwise",
+          "Purple gears turn your robot 90° counterclockwise (left).",
+        ],
         ["laser", "⌖", "Laser", "Fires after gears. Walls and robots block the beam."],
         [
           "repair",
@@ -146,7 +194,13 @@ export function BoardLegend() {
           data-help={help}
           data-help-title={label}
         >
-          <b>{icon}</b>
+          <b>
+            {id === "gear-left" || id === "gear-right" ? (
+              <GearSymbol direction={id === "gear-left" ? "left" : "right"} />
+            ) : (
+              icon
+            )}
+          </b>
           {label}
         </span>
       ))}
@@ -177,7 +231,9 @@ export function GameTooltips() {
   useEffect(() => {
     const show = (event: Event) => {
       const element = event.target as Element;
-      const target = element?.closest?.<HTMLElement>("[data-help]") ?? element?.closest?.<HTMLElement>("button,summary,input,.field-label");
+      const target =
+        element?.closest?.<HTMLElement>("[data-help]") ??
+        element?.closest?.<HTMLElement>("button,summary,input,.field-label");
       if (!target || target.closest(".map-grid")) {
         setTip(undefined);
         return;
@@ -386,9 +442,9 @@ export function CourseMap({
                     </g>
                   )}
                   {tile?.gear && (
-                    <text x={x + 0.5} y={y + 0.7} textAnchor="middle" fontSize=".65" fill="#916533">
-                      {tile.gear === "right" ? "↻" : "↺"}
-                    </text>
+                    <svg x={x + 0.05} y={y + 0.05} width=".9" height=".9" viewBox="0 0 256 256">
+                      <GearSymbol direction={tile.gear} />
+                    </svg>
                   )}
                   {tile?.repair && (
                     <text x={x + 0.5} y={y + 0.7} textAnchor="middle" fontSize=".6" fill="#256b50">

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BoardLegend, ProgramArt, TurnTimeline, actionDescription } from "./game-details";
-import { PROGRAM_HELP, robotInspection, TURN_STAGES } from "@/game/inspection";
+import { BoardLegend, ProgramArt, TurnTimeline } from "./game-details";
+import { PROGRAM_HELP, robotInspection } from "@/game/inspection";
 import { BOARD_BY_ID, COURSES } from "@/game/content/boards";
 import { OPTION_BY_ID } from "@/game/content/options";
 import { PROGRAM_LABELS } from "@/game/content/programs";
@@ -20,6 +20,7 @@ export interface PlaybackView {
   active?: { event: MatchEvent; durationMs: number };
   remaining: number;
   playing: boolean;
+  skipToEnd?: () => void;
   presented?: boolean;
   onPresented?: (revision: number) => void;
 }
@@ -178,6 +179,7 @@ export function LobbyPanel({
   setCourseId,
   fourLives,
   setFourLives,
+  chooseSpawn,
   start,
   error,
 }: {
@@ -188,10 +190,16 @@ export function LobbyPanel({
   setCourseId: (value: string) => void;
   fourLives: boolean;
   setFourLives: (value: boolean) => void;
+  chooseSpawn: (dock: number) => void;
   start: () => void;
   error: string;
 }) {
   const solo = view.public.mode === "solo";
+  const ownDock = view.public.robots.find((robot) => robot.seatId === view.seatId)?.spawnDock;
+  const waitingForSpawn = view.public.robots.filter(
+    (robot) => robot.controller === "human" && !robot.spawnDock,
+  );
+  const course = COURSES.find((candidate) => candidate.id === courseId) ?? COURSES[0];
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const copyInvite = async () => {
@@ -237,6 +245,11 @@ export function LobbyPanel({
                 <strong>{robot.displayName}</strong>
                 <small>
                   {identity.name}
+                  {robot.spawnDock
+                    ? ` · DOCK ${robot.spawnDock}`
+                    : robot.controller === "human"
+                      ? " · CHOOSING DOCK"
+                      : ""}
                   {robot.seatId === view.public.hostSeatId
                     ? " · HOST"
                     : robot.controller === "bot"
@@ -259,6 +272,44 @@ export function LobbyPanel({
             </div>
           ))}
       </div>
+      <section className="spawn-picker" aria-label="Choose your starting dock">
+        <div className="spawn-heading">
+          <strong>CHOOSE YOUR STARTING DOCK</strong>
+          <span>{ownDock ? `Dock ${ownDock} selected ✓` : "Pick a free dock"}</span>
+        </div>
+        <p>↑ Factory entrance · all robots face north</p>
+        <div className="spawn-docks">
+          {course.docks.map((dock) => {
+            const occupant = view.public.robots.find((robot) => robot.spawnDock === dock.number);
+            const yours = occupant?.seatId === view.seatId;
+            return (
+              <button
+                key={dock.number}
+                type="button"
+                aria-label={`Choose dock ${dock.number}${occupant ? ` · ${occupant.displayName}` : ""}`}
+                aria-pressed={yours}
+                disabled={Boolean(occupant && !yours)}
+                onClick={() => chooseSpawn(dock.number)}
+                className={yours ? "selected" : ""}
+                title={`Column ${String.fromCharCode(65 + dock.x)} · ${occupant?.displayName ?? "Available"}`}
+              >
+                <span>↑</span>
+                <b>{dock.number}</b>
+                <small>
+                  {yours ? "YOU" : occupant ? "TAKEN" : String.fromCharCode(65 + dock.x)}
+                </small>
+              </button>
+            );
+          })}
+        </div>
+        <small>
+          {solo
+            ? "CPU robots take the remaining docks."
+            : waitingForSpawn.length
+              ? `Waiting for ${waitingForSpawn.map((robot) => robot.displayName).join(", ")} to choose.`
+              : "Everyone has a dock. Ready to race."}
+        </small>
+      </section>
       {isHost && (
         <>
           <p className="section-label">CHOOSE YOUR PLAYGROUND</p>
@@ -293,7 +344,11 @@ export function LobbyPanel({
               Give everyone a fourth life
             </label>
           )}
-          <button className="primary" disabled={view.public.robots.length < 2} onClick={start}>
+          <button
+            className="primary"
+            disabled={view.public.robots.length < 2 || waitingForSpawn.length > 0}
+            onClick={start}
+          >
             START THE DIORAMA <span>→</span>
           </button>
         </>
@@ -334,6 +389,15 @@ export function MatchHud({
   submittedPlan: PublicRobotView["registers"];
 }) {
   const robot = view.public.robots.find((candidate) => candidate.seatId === view.seatId)!;
+  const displayedRobot = sceneRobots.find((entry) => entry.seatId === view.seatId) ?? robot;
+  const damage = displayedRobot.damage;
+  const canPowerDown =
+    !playback.playing &&
+    view.public.phase === "programming" &&
+    !robot.poweredDown &&
+    !robot.eliminated &&
+    !robot.destroyed;
+  const lockedCount = robot.registers.filter((register) => register.locked).length;
   const unlocked = robot.registers.filter((register) => !register.locked).length;
   const ordered = selected.map((id) => view.hand.find((card) => card.id === id)!).filter(Boolean);
   const registers =
@@ -356,6 +420,19 @@ export function MatchHud({
         </p>
         {sceneRobots.map((entry) => {
           const identity = ROBOT_BY_ID.get(entry.robotId)!;
+          const authority =
+            view.public.robots.find((robot) => robot.seatId === entry.seatId) ?? entry;
+          const status = entry.eliminated
+            ? "OUT"
+            : entry.destroyed
+              ? "RESPAWNING"
+              : entry.poweredDown
+                ? "POWERED DOWN"
+                : playback.playing
+                  ? "RUNNING"
+                  : authority.finishedProgramming
+                    ? "✓ READY"
+                    : "PLANNING";
           return (
             <div
               className={entry.seatId === view.seatId ? "you" : ""}
@@ -372,13 +449,20 @@ export function MatchHud({
                 </strong>
                 <small>
                   {entry.controller === "bot" ? "CPU · " : ""}
-                  {entry.lives} lives · {entry.damage}/10 damage
+                  <LifeHearts lives={entry.lives} total={view.public.fourLifeRule ? 4 : 3} />{" "}
+                  <span className={`roster-damage ${entry.damage >= 5 ? "critical" : ""}`}>
+                    {entry.damage}/10 damage
+                  </span>
                   <span className="roster-progress">
                     ⚑ {entry.checkpoint}/3 checkpoints · {entry.direction}
                   </span>
                 </small>
               </span>
-              <i className={entry.connected ? "online" : ""} />
+              <span
+                className={`ready-badge ${authority.finishedProgramming && !playback.playing ? "is-ready" : ""}`}
+              >
+                {!authority.connected ? "OFFLINE" : status}
+              </span>
             </div>
           );
         })}
@@ -427,17 +511,8 @@ export function MatchHud({
           <EventLog events={view.events} />
         </details>
       </aside>
-      {playback.playing && (
-        <div className="action-toast" role="status">
-          <small>
-            {TURN_STAGES.find((stage) => stage.id === playback.active?.event.stage)?.label ??
-              "Factory sequence"}
-          </small>
-          <strong>{actionDescription(playback.active?.event, sceneRobots)}</strong>
-          <span>{playback.remaining + 1} actions queued</span>
-        </div>
-      )}
       <section className="program-console">
+        <ProgrammingStatus view={view} playing={playback.playing} skipToEnd={playback.skipToEnd} />
         <div className="console-head">
           <div>
             <p className="kicker">YOUR FIVE-STEP PLAN</p>
@@ -447,27 +522,65 @@ export function MatchHud({
                 : `Choose ${unlocked} cards in order. Higher priority moves first. Keys 1–9 · Enter to lock in.`}
             </span>
           </div>
-          <div
-            className="damage-meter"
-            data-help-title="Damage & locked registers"
-            data-help="Each damage removes one card from your next hand. At 5–9 damage, the last registers lock. At 10, your robot is destroyed. Repair stations or powering down heal damage."
-            aria-label={`${robot.damage} damage`}
-          >
-            <small>
-              DAMAGE{" "}
-              <b>{sceneRobots.find((r) => r.seatId === view.seatId)?.damage ?? robot.damage}/10</b>
-            </small>
-            {Array.from({ length: 10 }, (_, index) => (
-              <i
-                key={index}
-                className={
-                  index <
-                  (sceneRobots.find((r) => r.seatId === view.seatId)?.damage ?? robot.damage)
-                    ? "hit"
-                    : ""
+        </div>
+        <div className={`robot-health ${damage >= 5 ? "critical" : ""}`}>
+          <div className="health-summary">
+            <div className="lives-and-power">
+              <span className="lives-label">LIVES</span>
+              <LifeHearts lives={displayedRobot.lives} total={view.public.fourLifeRule ? 4 : 3} />
+              <button
+                type="button"
+                className={`power-repair-button ${robot.powerDownNext ? "queued" : ""}`}
+                aria-label={
+                  robot.powerDownNext ? "Cancel power down next turn" : "Power down next turn"
                 }
-              />
+                aria-pressed={robot.powerDownNext}
+                disabled={!canPowerDown}
+                onClick={() => powerDown(!robot.powerDownNext)}
+                data-help-title="Power down to repair"
+                data-help="Skip programming next turn to fully repair your robot. Belts, pushers and lasers still affect you. Click again to cancel before the turn resolves."
+              >
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 3v9M7 5.8a8 8 0 1 0 10 0"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span>
+                  {robot.poweredDown
+                    ? "POWERED DOWN"
+                    : robot.powerDownNext
+                      ? "REPAIR QUEUED ✓"
+                      : "POWER DOWN"}
+                </span>
+              </button>
+            </div>
+            <strong>
+              DAMAGE {damage}
+              <small>/10</small>
+            </strong>
+          </div>
+          <div
+            className="damage-tokens"
+            aria-label={`${damage} of 10 damage tokens`}
+            data-help-title="Damage & locked registers"
+            data-help="Each damage removes one card from your next hand. At 5–9 damage, registers lock from right to left. At 10, your robot is destroyed."
+          >
+            {Array.from({ length: 10 }, (_, index) => (
+              <span key={index} className={index < damage ? "hit" : ""} aria-hidden="true">
+                {index + 1}
+              </span>
             ))}
+          </div>
+          <div className="damage-consequences">
+            <span>
+              {lockedCount
+                ? `🔒 ${lockedCount} register${lockedCount === 1 ? "" : "s"} locked · repeats next turn`
+                : "5 damage locks register 5"}
+            </span>
+            <span>10 = lose a ♥</span>
           </div>
         </div>
         <div className="register-row">
@@ -488,7 +601,7 @@ export function MatchHud({
                 }
               >
                 <b>{index + 1}</b>
-                {register.locked && <span className="lock">LOCKED</span>}
+                {register.locked && <span className="lock">🔒 LOCKED</span>}
                 {card ? (
                   <>
                     <ProgramArt kind={card.kind} />
@@ -576,7 +689,7 @@ export function MatchHud({
             <button
               className="primary"
               type="button"
-              disabled={playback.playing}
+              disabled={playback.playing || view.public.phase !== "programming"}
               onClick={() => powerDown(false)}
             >
               POWER UP AFTER THIS TURN <span>→</span>
@@ -584,19 +697,9 @@ export function MatchHud({
           </div>
         ) : (
           <div className="console-actions">
-            <button
-              type="button"
-              data-help-title="Power down next turn"
-              data-help="Skip programming next turn to fully repair your robot. Belts, pushers and lasers still affect you while powered down."
-              className={robot.powerDownNext ? "active" : ""}
-              disabled={playback.playing}
-              onClick={() => powerDown(!robot.powerDownNext)}
-            >
-              POWER DOWN NEXT TURN
-            </button>
             <label
               data-help-title="Reduced motion"
-              data-help="Keep the action explanations while disabling travel animations, particles and idle movement."
+              data-help="Keep the turn indicators while disabling travel animations, particles and idle movement."
             >
               <input
                 type="checkbox"
@@ -608,9 +711,7 @@ export function MatchHud({
             <button
               className="primary"
               type="button"
-              disabled={
-                playback.playing || selected.length !== unlocked || robot.finishedProgramming
-              }
+              disabled={!canEdit || selected.length !== unlocked}
               onClick={submit}
             >
               {playback.playing
@@ -639,6 +740,97 @@ export function MatchHud({
         </div>
       )}
     </>
+  );
+}
+
+export function LifeHearts({ lives, total = 3 }: { lives: number; total?: number }) {
+  return (
+    <span className="life-hearts" role="img" aria-label={`${lives} of ${total} lives`}>
+      {Array.from({ length: total }, (_, index) => (
+        <span
+          key={index}
+          className={index < lives ? "heart-full" : "heart-empty"}
+          aria-hidden="true"
+        >
+          ♥
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function ProgrammingStatus({
+  view,
+  playing,
+  skipToEnd,
+}: {
+  view: PrivateMatchView;
+  playing: boolean;
+  skipToEnd?: () => void;
+}) {
+  const [now, setNow] = useState(Date.now());
+  const deadline = view.public.timerDeadline;
+  useEffect(() => {
+    setNow(Date.now());
+    if (!deadline) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [deadline]);
+  const active = view.public.robots.filter(
+    (robot) => !robot.eliminated && !robot.destroyed && !robot.poweredDown,
+  );
+  const ready = active.filter((robot) => robot.finishedProgramming).length;
+  const remaining = Math.max(0, Math.ceil(((deadline ?? now) - now) / 1000));
+  const waiting = active.filter((robot) => !robot.finishedProgramming);
+  const solo = view.public.mode === "solo";
+  return (
+    <div className={`programming-status ${deadline && remaining <= 10 ? "urgent" : ""}`}>
+      <div>
+        <strong>
+          {playing
+            ? "FACTORY IN MOTION"
+            : view.public.phase === "paused"
+              ? "RACE PAUSED"
+              : solo
+                ? "PLAN AT YOUR OWN PACE"
+                : `${ready} / ${active.length} READY`}
+        </strong>
+        <small>
+          {playing
+            ? "Next hand opens after playback."
+            : view.public.phase === "paused"
+              ? "Waiting for everyone to reconnect."
+              : solo
+                ? "The CPU crew moves when you lock in."
+                : deadline
+                  ? `Waiting for ${waiting.map((robot) => robot.displayName).join(", ")}. Unfinished programs are filled at random.`
+                  : "The last player gets 30 seconds to finish."}
+        </small>
+      </div>
+      {playing && solo && skipToEnd && (
+        <button
+          className="skip-turn-button"
+          type="button"
+          onClick={skipToEnd}
+          aria-label="Skip to end of turn"
+          data-help="Skip the remaining animations and show the resolved turn, including repairs and respawns."
+        >
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M3 5v14l9-7zm9 0v14l9-7z" />
+          </svg>
+          SKIP TO END
+        </button>
+      )}
+      {!playing && deadline && (
+        <div className="ready-countdown" role="timer" aria-label={`${remaining} seconds remaining`}>
+          <b>{remaining}</b>
+          <span>SECONDS</span>
+        </div>
+      )}
+      {!playing && view.public.phase === "paused" && view.public.timerRemainingMs !== undefined && (
+        <b className="paused-clock">{Math.ceil(view.public.timerRemainingMs / 1000)}s paused</b>
+      )}
+    </div>
   );
 }
 
@@ -683,7 +875,7 @@ export function SoloResultPanel({
             <b>{human.checkpoint}</b> CHECKPOINTS
           </span>
           <span>
-            <b>{human.lives}</b> LIVES LEFT
+            <LifeHearts lives={human.lives} total={view.public.fourLifeRule ? 4 : 3} /> LIVES LEFT
           </span>
           <span>
             <b>{view.public.robots.length}</b> LITTLE RACERS

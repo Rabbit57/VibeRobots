@@ -3,6 +3,13 @@
 import { useLayoutEffect, useMemo, useRef, useEffect } from "react";
 import * as THREE from "three";
 import { courseBounds, courseTile } from "@/game/content/boards";
+import {
+  GEAR_COLORS,
+  GEAR_OUTLINE,
+  GEAR_ARROW_ARC,
+  GEAR_ARROW_HEAD,
+  surfaceRotation,
+} from "@/game/board-visuals";
 import { directionAngle } from "@/game/presentation";
 import type { CourseDefinition } from "@/game/types";
 
@@ -23,22 +30,22 @@ export function BoardSurfaces({ course }: { course: CourseDefinition }) {
             `belt-${tile.conveyor.speed}${tile.conveyor.rotate ? `-${tile.conveyor.rotate}` : ""}`,
             x,
             z,
-            directionAngle(tile.conveyor.direction),
+            surfaceRotation(tile.conveyor.direction)[2],
           );
         else if (tile?.pit) add("pit", x, z, 0, 0.19);
         else if (tile?.repair) add(tile.optionSite ? "upgrade" : "repair", x, z, 0, 0.2);
-        else if (tile?.gear) add(`gear-${tile.gear}`, x, z, 0, 0.23);
+        if (tile?.gear) add(`gear-${tile.gear}`, x, z, 0, 0.23);
         else if (tile?.pusher)
           add(
             `push-${tile.pusher.activeRegisters.join("")}`,
             x,
             z,
-            directionAngle(tile.pusher.direction),
+            surfaceRotation(tile.pusher.direction)[2],
             0.35,
           );
         else if (!tile?.checkpoint && !tile?.laser) add("floor", x, z, 0, 0.085);
         if (tile?.laser)
-          add(`laser-${tile.laser.count}`, x, z, directionAngle(tile.laser.direction), 0.09);
+          add(`laser-${tile.laser.count}`, x, z, surfaceRotation(tile.laser.direction)[2], 0.09);
       }
     for (const dock of course.docks) add(`dock-${dock.number}`, dock.x, dock.y, 0, 0.08);
     return [...result.entries()];
@@ -124,7 +131,7 @@ function SurfaceBatch({ kind, items }: { kind: string; items: Mark[] }) {
     items.forEach((item, index) => {
       matrix.compose(
         new THREE.Vector3(item.x, item.y, item.z),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, -item.angle)),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(...surfaceRotation(item.angle))),
         new THREE.Vector3(1, 1, 1),
       );
       ref.current!.setMatrixAt(index, matrix);
@@ -223,26 +230,66 @@ function drawSurface(kind: string) {
     ctx.fillRect(73, 83, 110, 38);
     text(kind === "upgrade" ? "◆ UPGRADE" : "REPAIR", 205, 25, "#daefbf");
   } else if (kind.startsWith("gear-")) {
-    ctx.strokeStyle = "#fff5cb";
-    ctx.lineWidth = 11;
-    ctx.beginPath();
-    ctx.arc(128, 128, 103, -0.9, 3.8);
-    ctx.stroke();
     const left = kind.endsWith("left");
+    const rim = ctx.createLinearGradient(0, 0, 256, 256);
+    rim.addColorStop(0, "#e3dfc5");
+    rim.addColorStop(0.45, "#b8b99b");
+    rim.addColorStop(1, "#6a7868");
+    ctx.fillStyle = rim;
+    ctx.strokeStyle = "#35483e";
+    ctx.lineWidth = 5;
+    ctx.lineJoin = "round";
+    const teeth = new Path2D(GEAR_OUTLINE);
+    ctx.fill(teeth);
+    ctx.stroke(teeth);
+    ctx.fillStyle = GEAR_COLORS[left ? "left" : "right"];
+    ctx.beginPath();
+    ctx.arc(128, 128, 95, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#35483e";
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    // Two sweeping arrows make the direction visible from either side of the table.
     ctx.save();
     if (left) {
       ctx.translate(256, 0);
       ctx.scale(-1, 1);
     }
-    ctx.fillStyle = "#fff5cb";
-    ctx.beginPath();
-    ctx.moveTo(185, 28);
-    ctx.lineTo(234, 30);
-    ctx.lineTo(213, 74);
-    ctx.closePath();
-    ctx.fill();
+    for (const half of [0, 1]) {
+      ctx.save();
+      ctx.translate(128, 128);
+      ctx.rotate(half * Math.PI);
+      ctx.translate(-128, -128);
+      ctx.strokeStyle = "#fffbea";
+      ctx.fillStyle = "#fffbea";
+      ctx.lineWidth = 18;
+      ctx.lineCap = "round";
+      ctx.stroke(new Path2D(GEAR_ARROW_ARC));
+      ctx.fill(new Path2D(GEAR_ARROW_HEAD));
+      ctx.restore();
+    }
     ctx.restore();
-    text(left ? "L" : "R", 143, 42, "#fff4d2");
+    // Recessed center hub and four flush bolts give the face a mechanical silhouette.
+    ctx.fillStyle = "#35483e";
+    ctx.beginPath();
+    ctx.arc(128, 128, 29, 0, Math.PI * 2);
+    ctx.fill();
+    text("90°", 136, 23, "#fffbea");
+    for (let index = 0; index < 4; index++) {
+      const angle = Math.PI / 4 + (index * Math.PI) / 2;
+      const x = 128 + Math.cos(angle) * 87,
+        y = 128 + Math.sin(angle) * 87;
+      ctx.fillStyle = "#eadfbc";
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#5c6657";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - 2, y);
+      ctx.lineTo(x + 2, y);
+      ctx.stroke();
+    }
   } else if (kind.startsWith("dock-")) {
     ctx.strokeStyle = "#6e6187";
     ctx.lineWidth = 9;

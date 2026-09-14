@@ -1,7 +1,7 @@
 import vinext from 'vinext/server/fetch-handler';
 import { DurableObject } from 'cloudflare:workers';
 import { addSoloBots, programSoloBots } from '../game/bot';
-import { addSeat, applyCommand, createLobby, privateView, publicView, RuleError, shuffled } from '../game/engine';
+import { addSeat, applyCommand, createLobby, privateView, publicView, RuleError, expireProgrammingTimer } from '../game/engine';
 import type { MatchCommand, MatchEvent, MatchMode, MatchState } from '../game/types';
 
 interface Env {
@@ -134,10 +134,15 @@ export class MatchRoom extends DurableObject<Env> {
       if (room.state.phase === 'paused' && active.every((candidate) => candidate.connected)) {
         room.state.phase = room.state.phaseBeforePause ?? 'programming';
         room.state.phaseBeforePause = undefined;
+        if (room.state.timerRemainingMs !== undefined) {
+          room.state.timerDeadline = Date.now() + room.state.timerRemainingMs;
+          room.state.timerRemainingMs = undefined;
+        }
         room.state.revision += 1;
         this.log('match-resumed', { code: room.state.roomCode });
       }
       await this.persist();
+      await this.scheduleAlarm();
       this.log('seat-reconnected', { code: room.state.roomCode, seatId: shortId(message.seatId) });
       this.broadcast([]);
       return;
@@ -179,6 +184,10 @@ export class MatchRoom extends DurableObject<Env> {
     robot.connected = false;
     room.seats[attachment.seatId].disconnectedAt = Date.now();
     if (!['lobby', 'complete', 'paused'].includes(room.state.phase) && !robot.eliminated) {
+      if (room.state.timerDeadline) {
+        room.state.timerRemainingMs = Math.max(1, room.state.timerDeadline - Date.now());
+        room.state.timerDeadline = undefined;
+      }
       room.state.phaseBeforePause = room.state.phase;
       room.state.phase = 'paused';
       room.state.revision += 1;
@@ -194,15 +203,10 @@ export class MatchRoom extends DurableObject<Env> {
     if (!room) return;
     const now = Date.now();
     if (room.state.phase === 'programming' && room.state.timerDeadline && room.state.timerDeadline <= now) {
-      const robot = room.state.robots.find((candidate) => !candidate.finishedProgramming && !candidate.eliminated && !candidate.destroyed && !candidate.poweredDown);
-      if (robot) {
-        const count = robot.registers.filter((register) => !register.locked).length;
-        const cards = shuffled(room.state.hands[robot.seatId] ?? [], room.state).slice(0, count).map((card) => card.id);
-        const result = applyCommand(room.state, robot.seatId, { type: 'program', id: crypto.randomUUID(), revision: room.state.revision, cards });
-        result.events.unshift({ revision: ++room.state.eventRevision, type: 'timer-expired', message: `${robot.displayName}'s remaining cards were placed at random.`, seatId: robot.seatId, robotId: robot.robotId, public: true });
-        room.recentEvents = [...room.recentEvents, ...result.events].slice(-100);
-        this.broadcast(result.events);
-      }
+      const result = expireProgrammingTimer(room.state, now);
+      room.recentEvents = [...room.recentEvents, ...result.events].slice(-100);
+      await this.persist();
+      this.broadcast(result.events);
     }
     const host = room.state.robots.find((candidate) => candidate.seatId === room.state.hostSeatId);
     const hostSecret = host && room.seats[host.seatId];

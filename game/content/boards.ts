@@ -17,6 +17,10 @@ const rectLoop = (x: number, y: number, width: number, height: number, speed: 1 
   ...line(Array.from({ length: height - 1 }, (_, i) => [x + width - 1, y + i] as [number, number]), 'south', speed),
   ...line(Array.from({ length: width - 1 }, (_, i) => [x + width - 1 - i, y + height - 1] as [number, number]), 'west', speed),
   ...line(Array.from({ length: height - 1 }, (_, i) => [x, y + height - 1 - i] as [number, number]), 'north', speed),
+  [x, y, { conveyor: { direction: 'east', speed, rotate: 'right' } }],
+  [x + width - 1, y, { conveyor: { direction: 'south', speed, rotate: 'right' } }],
+  [x + width - 1, y + height - 1, { conveyor: { direction: 'west', speed, rotate: 'right' } }],
+  [x, y + height - 1, { conveyor: { direction: 'north', speed, rotate: 'right' } }],
 ];
 
 const mergeTiles = (...groups: TilePatch[][]): Record<string, TileDefinition> => {
@@ -197,7 +201,8 @@ export function courseTile(course: CourseDefinition, x: number, y: number): Tile
       return { ...rotateTile(board.tiles[`${source.x},${source.y}`] ?? {}, rotation), checkpoint: checkpoint?.number };
     }
   }
-  return checkpoint ? { checkpoint: checkpoint.number } : undefined;
+  if (course.docks.some((dock) => dock.x === x && dock.y === y)) return {};
+  return undefined;
 }
 
 function rotateTile(tile: TileDefinition, rotation: 0 | 90 | 180 | 270): TileDefinition {

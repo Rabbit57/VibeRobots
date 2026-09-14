@@ -1,4 +1,5 @@
 import type { CourseDefinition, ProgramKind, PublicRobotView, TileDefinition } from "./types";
+import { GEAR_COLORS } from "./board-visuals";
 import { courseTile } from "./content/boards";
 import { ROBOT_BY_ID } from "./content/robots";
 
@@ -97,7 +98,7 @@ export function tileInspection(course: CourseDefinition, x: number, y: number): 
     const belt = tile.conveyor;
     titles.push(belt.speed === 2 ? "Express conveyor · 2×" : "Conveyor · 1×");
     details.push(
-      `Carries your robot ${belt.direction}. ${belt.speed === 2 ? "Moves in both the Express and All belts stages: up to 2 squares per register." : "Moves 1 square during the All belts stage of every register."}${belt.rotate ? ` This bend turns an arriving robot ${belt.rotate}.` : ""}`,
+      `Carries your robot ${belt.direction}. ${belt.speed === 2 ? "Moves in both the Express and All belts stages: up to 2 squares per register." : "Moves 1 square during the All belts stage of every register."}${belt.rotate ? ` This bend rotates robots arriving on the curved branch; straight-through arrivals keep their heading.` : ""}`,
     );
     color = belt.speed === 2 ? "#237ab4" : "#b87b29";
   }
@@ -106,7 +107,7 @@ export function tileInspection(course: CourseDefinition, x: number, y: number): 
     details.push(
       `Rotates your robot 90° ${tile.gear === "right" ? "clockwise" : "counterclockwise"} after pushers, every register.`,
     );
-    color = "#957046";
+    color = GEAR_COLORS[tile.gear];
   }
   if (tile.pusher) {
     titles.push("Mechanical pusher");

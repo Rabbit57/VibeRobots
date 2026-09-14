@@ -7,6 +7,7 @@ import type { MatchEvent } from '../game/types';
 function fixture(optionId: string) {
   const state = createLobby('OPTIONTEST', { seatId: 'a', robotId: 'hammer-bot', displayName: 'A' }, 1, 99);
   addSeat(state, { seatId: 'b', robotId: 'hulk-x90', displayName: 'B' });
+  state.robots.filter((robot) => robot.controller === 'human').forEach((robot, index) => applyCommand(state, robot.seatId, { type: 'choose-spawn', id: `dock-${index}`, revision: state.revision, dock: [7, 5][index] }, 1));
   applyCommand(state, 'a', { type: 'start', id: 'start', revision: state.revision, courseId: 'risky-exchange', fourLifeRule: false });
   const robot = state.robots[0];
   const definition = OPTION_CARDS.find((card) => card.id === optionId)!;

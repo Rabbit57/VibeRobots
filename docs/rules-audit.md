@@ -64,3 +64,13 @@ The shipped deck has exactly one entry for each row. Text in the UI is newly wri
 ## Intentional launch exclusions
 
 Team modes, SuperBot/two-robot scenarios, other special courses, the four remaining board faces, AI, spectators, matchmaking, and a course editor are not part of the launch rules surface. These exclusions never change the physics of the included standard courses.
+
+## September 2026 board and UI regression audit
+
+The board audit found mirrored east/west markings in the 3D printed surfaces, sequential conveyor pushes, missing express-loop corner rotations, lasers skipping their own emitter square, and starting docks excluded from archive respawn. These are corrected and covered by `tests/board-rules.test.ts`. Conveyor intentions now resolve together; collisions stop movement, and only curved belt arrivals rotate the robot. Pushers retain their register timing and do not activate again merely because a robot was pushed onto them. Repair/upgrade cleanup precedes archive respawn, and continuing a power-down clears newly accumulated damage.
+
+Players now claim exclusive starting docks before starting; dock numbers determine tie priority. Course changes are broadcast to the whole lobby. Solo CPU robots use remaining docks. This manual dock selection is an intentional setup variation.
+
+The multiplayer timer retains the final-player rule: it starts once when only one programmer remains. The authoritative deadline is shown to all players, freezes while disconnected, and resumes on reconnection. Solo play has no countdown. The real alarm, shared deadline and reconnection are exercised in `tests/e2e/timer.spec.ts`.
+
+Direction colors are orange for clockwise and purple for counterclockwise, paired with large arrowheads and CW/CCW labels. Hearts, numbered damage tokens, locked-register banners and named readiness badges have desktop/tablet coverage.

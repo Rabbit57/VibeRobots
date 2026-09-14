@@ -124,6 +124,7 @@ export interface RobotState {
   destroyed: boolean;
   eliminated: boolean;
   connected: boolean;
+  spawnDock?: number;
   finishedProgramming: boolean;
 }
 
@@ -152,6 +153,7 @@ export interface MatchState {
   registerIndex: number;
   pendingDecision?: PendingDecision;
   timerDeadline?: number;
+  timerRemainingMs?: number;
   rngState: number;
   winnerSeatId?: string;
   completionReason?: CompletionReason;
@@ -163,6 +165,8 @@ export interface MatchState {
 
 export type MatchCommand =
   | { type: 'start'; id: string; revision: number; courseId: string; fourLifeRule: boolean }
+  | { type: 'choose-spawn'; id: string; revision: number; dock: number }
+  | { type: 'choose-course'; id: string; revision: number; courseId: string }
   | { type: 'program'; id: string; revision: number; cards: string[] }
   | { type: 'announce-power-down'; id: string; revision: number; enabled: boolean }
   | { type: 'stay-powered-down'; id: string; revision: number; enabled: boolean }
