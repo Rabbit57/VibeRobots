@@ -180,7 +180,7 @@ export interface PublicRobotView extends Omit<RobotState, 'registers' | 'options
   revealedOptions: string[];
 }
 
-export interface PublicMatchView extends Omit<MatchState, 'hands' | 'programDeck' | 'optionDeck' | 'recentCommandIds' | 'robots'> {
+export interface PublicMatchView extends Omit<MatchState, 'hands' | 'programDeck' | 'optionDeck' | 'recentCommandIds' | 'rngState' | 'pendingDecision' | 'robots'> {
   robots: PublicRobotView[];
   programDeckCount: number;
   optionDeckCount: number;
@@ -191,6 +191,7 @@ export interface PrivateMatchView {
   seatId: string;
   hand: ProgramCard[];
   options: RobotState['options'];
+  decision?: PendingDecision;
   events: MatchEvent[];
 }
 

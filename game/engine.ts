@@ -551,7 +551,16 @@ function updatePublicRobot(state: MatchState, robot: RobotState) {
 }
 
 export function publicView(state: MatchState): PublicMatchView {
-  const { hands: _hands, programDeck, optionDeck, recentCommandIds: _commands, robots, ...publicState } = state;
+  const {
+    hands: _hands,
+    programDeck,
+    optionDeck,
+    recentCommandIds: _commands,
+    rngState: _rngState,
+    pendingDecision: _pendingDecision,
+    robots,
+    ...publicState
+  } = state;
   return {
     ...publicState,
     robots: robots.map((robot) => {
@@ -566,7 +575,8 @@ export function publicView(state: MatchState): PublicMatchView {
 
 export function privateView(state: MatchState, seatId: string, events: MatchEvent[] = []): PrivateMatchView {
   const robot = robotFor(state, seatId);
-  return { public: publicView(state), seatId, hand: state.hands[seatId] ?? [], options: robot.options, events: events.filter((item) => item.public || item.seatId === seatId) };
+  const decision = state.pendingDecision?.seatId === seatId ? state.pendingDecision : undefined;
+  return { public: publicView(state), seatId, hand: state.hands[seatId] ?? [], options: robot.options, decision, events: events.filter((item) => item.public || item.seatId === seatId) };
 }
 
 function finalizeEvents(state: MatchState, events: MatchEvent[]) {

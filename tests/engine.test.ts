@@ -160,9 +160,12 @@ describe('movement, board order, and damage', () => {
 describe('authority, redaction, and deterministic replay', () => {
   test('public snapshots never include hands or unrevealed cards', () => {
     const state = started();
+    state.pendingDecision = { seatId: 'seat-a', kind: 'option-direction', choices: ['north', 'south'] };
     const hiddenId = state.hands['seat-a'][0].id;
     const snapshot = publicView(state) as unknown as Record<string, unknown>;
     assert.equal('hands' in snapshot, false);
+    assert.equal('rngState' in snapshot, false);
+    assert.equal('pendingDecision' in snapshot, false);
     assert.equal(JSON.stringify(snapshot).includes(hiddenId), false);
   });
 
