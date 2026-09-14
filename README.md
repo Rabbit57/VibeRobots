@@ -21,12 +21,31 @@ npm run build
 npm run test:browser
 ```
 
+## Art pipeline
+
+The production models are generated from a deterministic Blender script. Blender
+4.5 LTS or newer is recommended.
+
+```bash
+npm run assets:build
+npm run assets:validate
+```
+
+`assets:build` writes editable source scenes to `art/blender/source`, portrait
+masters to `art/blender/renders`, eight individually loadable robot GLBs to
+`public/assets/models/robots`, and the shared modular board kit to
+`public/assets/models/factory-kit.glb`. Runtime portrait WebPs are checked in so
+the deployed application does not require Blender. See `docs/art-pipeline.md`
+for animation contracts, ImageGen prompts, and performance budgets.
+
 ## Architecture
 
 - `game/engine.ts` — deterministic 2005-compatible rules engine
 - `game/content/` — typed Programs, Options, robots, boards, and courses
 - `worker/index.ts` — Vinext Worker + SQLite `MatchRoom` Durable Object
-- `components/game.tsx` — accessible DOM controls and R3F factory rendering
+- `components/game.tsx` — server connection and the authority/presentation boundary
+- `components/factory-scene.tsx` — demand-rendered R3F diorama and GLB animation
+- `game/presentation.ts` — deterministic event-to-keyframe presentation compiler
 - `docs/rules-audit.md` — rule and Option source matrix
 
 Production is configured for [vibe-robots.ailocalops.com](https://vibe-robots.ailocalops.com/). Match state is room-based and authoritative, so the AILO local-save bridge is intentionally disabled.

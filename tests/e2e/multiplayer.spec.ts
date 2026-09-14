@@ -8,34 +8,51 @@ test('two players create, join, start, program, and reconnect', async ({ browser
   const guest = await guestContext.newPage();
   await host.goto('/');
   await expect(host.locator('.game-root')).toHaveAttribute('data-ready', 'true');
-  await host.getByPlaceholder('Enter a callsign').fill('Ada');
-  await host.getByRole('button', { name: /create private room/i }).click();
-  await expect(host.locator('.lobby-panel .kicker')).toHaveText('PRIVATE ROOM');
+  await host.getByPlaceholder('Your workshop nickname').fill('Ada');
+  await host.getByRole('button', { name: /create a cozy room/i }).click();
+  await expect(host.locator('.lobby-panel .kicker')).toHaveText('PRIVATE WORKSHOP');
   const code = await host.locator('.lobby-panel h2').innerText();
   await guest.goto(`/?room=${code}`);
   await expect(guest.locator('.game-root')).toHaveAttribute('data-ready', 'true');
   await expect(guest.locator('.join-panel')).toBeVisible();
-  await guest.getByPlaceholder('Enter a callsign').fill('Grace');
+  await guest.getByPlaceholder('Your workshop nickname').fill('Grace');
   const hulk = guest.getByTitle('Hulk X90');
   await hulk.click({ force: true });
   await expect(hulk).toHaveAttribute('aria-pressed', 'true');
-  await guest.getByRole('button', { name: /claim robot/i }).click();
+  await guest.getByRole('button', { name: /claim this robot/i }).click();
   await expect(guest.locator('.lobby-panel')).toBeVisible();
   await expect(host.locator('.seat:not(.empty)')).toHaveCount(2, { timeout: 30_000 });
   await expect(host.getByText('Grace', { exact: true })).toBeVisible();
-  await host.getByRole('button', { name: /start race/i }).click();
-  await expect(host.getByText('PROGRAM REGISTERS')).toBeVisible();
-  await expect(guest.getByText('PROGRAM REGISTERS')).toBeVisible();
+  await host.getByRole('button', { name: /start the diorama/i }).click();
+  await expect(host.getByText('YOUR FIVE-STEP PLAN')).toBeVisible();
+  await expect(guest.getByText('YOUR FIVE-STEP PLAN')).toBeVisible();
+  const startRevision = await host.evaluate(() => (window as typeof window & { __VIBE_MATCH__?: { public: { revision: number } } }).__VIBE_MATCH__?.public.revision ?? 0);
   for (const page of [host, guest]) {
     const cards = page.locator('.program-card');
     for (let index = 0; index < 5; index += 1) await cards.nth(index).click();
-    await page.getByRole('button', { name: /execute 5\/5/i }).click();
+    await page.getByRole('button', { name: /lock in 5\/5/i }).click();
   }
-  await expect(host.getByText(/PROGRAMMING PHASE|RACE COMPLETE/i)).toBeVisible();
+  await expect.poll(async () => {
+    const states = await Promise.all([host, guest].map((page) => page.evaluate(() => {
+      const match = (window as typeof window & { __VIBE_MATCH__?: { public: { revision: number; phase: string } } }).__VIBE_MATCH__;
+      return match ? { revision: match.public.revision, phase: match.public.phase } : undefined;
+    })));
+    return Boolean(states[0] && states[1] && states[0].revision > startRevision && states[0].revision === states[1].revision && states[0].phase === states[1].phase && ['programming', 'complete'].includes(states[0].phase));
+  }).toBe(true);
+  const publicResult = async (page: typeof host) => page.evaluate(() => {
+    const match = (window as typeof window & { __VIBE_MATCH__: { public: { revision: number; phase: string; robots: unknown[] }; events: Array<{ revision: number; type: string; public: boolean }> } }).__VIBE_MATCH__;
+    return {
+      revision: match.public.revision,
+      phase: match.public.phase,
+      robots: match.public.robots,
+      events: match.events.filter((event) => event.public).map(({ revision, type }) => ({ revision, type })),
+    };
+  });
+  expect(await publicResult(host)).toEqual(await publicResult(guest));
   await host.reload();
   await expect(host.locator('.program-console, .lobby-panel')).toBeVisible({ timeout: 15_000 });
   await guest.close();
-  await expect(host.getByText(/PAUSED — RECONNECTING/i)).toBeVisible();
+  await expect(host.getByText(/PAUSED · RECONNECTING/i)).toBeVisible();
   await hostContext.close();
   await guestContext.close();
 });
@@ -44,7 +61,7 @@ test('tablet supports touch-sized controls and reduced motion', async ({ page },
   test.skip(testInfo.project.name !== 'landscape-tablet', 'tablet-only check');
   await page.goto('/');
   await expect(page.getByText('Factory floor too small')).toBeHidden();
-  await expect(page.getByRole('button', { name: /create private room/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /create a cozy room/i })).toBeVisible();
   await page.getByRole('button', { name: /sound on/i }).tap();
   await expect(page.getByRole('button', { name: /sound off/i })).toBeVisible();
 });

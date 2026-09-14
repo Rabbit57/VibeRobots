@@ -12,3 +12,4 @@ worker-configuration.d.ts
 !.env.example
 .DS_Store
 *.log
+*.blend1

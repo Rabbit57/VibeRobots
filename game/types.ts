@@ -1,6 +1,7 @@
 export type Direction = 'north' | 'east' | 'south' | 'west';
 export type ProgramKind = 'move1' | 'move2' | 'move3' | 'backup' | 'left' | 'right' | 'uturn';
 export type Phase = 'lobby' | 'programming' | 'executing' | 'decision' | 'paused' | 'complete';
+export type ExecutionStage = 'program' | 'express-conveyor' | 'conveyor' | 'pushers' | 'gears' | 'lasers' | 'sites' | 'cleanup';
 
 export interface Position {
   x: number;
@@ -40,6 +41,8 @@ export interface RobotDefinition {
   accent: string;
   marker: string;
   silhouette: 'hammer' | 'tank' | 'spinner' | 'crusher' | 'hauler' | 'antenna' | 'walker' | 'racer';
+  modelUrl: string;
+  portraitUrl: string;
 }
 
 export interface ConveyorDefinition {
@@ -167,8 +170,14 @@ export interface MatchEvent {
   seatId?: string;
   robotId?: string;
   register?: number;
+  stage?: ExecutionStage;
+  ordinal?: number;
   from?: Position;
   to?: Position;
+  path?: Position[];
+  fromDirection?: Direction;
+  toDirection?: Direction;
+  source?: string;
   damage?: number;
   public: boolean;
   data?: Record<string, unknown>;

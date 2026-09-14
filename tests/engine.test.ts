@@ -81,6 +81,10 @@ describe('movement, board order, and damage', () => {
     const events = resolveTurn(state);
     assert.ok(events.some((event) => event.type === 'conveyor'));
     assert.ok(events.some((event) => event.type === 'damage' || event.type === 'destroyed'));
+    const laser = events.find((event) => event.type === 'laser-fired' && (event.path?.length ?? 0) >= 2);
+    assert.equal(laser?.stage, 'lasers');
+    assert.ok(['robot', 'rear-laser', 'factory'].includes(laser?.source ?? ''));
+    assert.ok(laser?.toDirection);
   });
 
   test('checkpoints, archives, repair and victory use register/cleanup timing', () => {
@@ -177,9 +181,9 @@ describe('authority, redaction, and deterministic replay', () => {
   });
 
   const expectedGolden: Record<string, string> = {
-    'risky-exchange': '9d6268b04bf2b2eb',
-    'dizzy-dash': '55ad312cdd6f5a17',
-    'against-the-grain': 'eb19604a514ff495',
+    'risky-exchange': 'd4e41919e1eb7a35',
+    'dizzy-dash': 'c9075a1436a839bb',
+    'against-the-grain': '89d309a9858bed4b',
   };
   for (const course of COURSES) test(`golden deterministic replay: ${course.name}`, () => {
     const replay = () => {

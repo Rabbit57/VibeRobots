@@ -15,6 +15,8 @@
     "typegen": "wrangler types --config dist/server/wrangler.json worker-configuration.d.ts",
     "smoke:production": "node scripts/smoke-production.mjs",
     "verify:production-match": "node --import tsx scripts/verify-production-match.ts",
+    "assets:build": "blender --background --python tools/blender/build_assets.py",
+    "assets:validate": "node scripts/validate-assets.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint app components game worker tests scripts ailo.config.ts vite.config.ts playwright.config.ts",
     "format": "oxfmt .",

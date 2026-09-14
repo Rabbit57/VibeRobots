@@ -224,10 +224,11 @@ export function resolveTurn(state: MatchState, events: MatchEvent[] = []): Match
 }
 
 function executeProgram(state: MatchState, course: CourseDefinition, robot: RobotState, card: ProgramCard, events: MatchEvent[]) {
-  events.push({ ...event('program', `${robot.displayName}: ${card.kind} ${card.priority}.`, robot), register: state.registerIndex + 1, data: { card } });
+  events.push({ ...event('program', `${robot.displayName}: ${card.kind} ${card.priority}.`, robot), register: state.registerIndex + 1, stage: 'program', data: { card } });
   if (card.rotation) {
+    const fromDirection = robot.direction;
     turnRobot(robot, card.rotation);
-    events.push({ ...event('turn', `${robot.displayName} rotated.`, robot), to: { ...robot.position } });
+    events.push({ ...event('turn', `${robot.displayName} rotated.`, robot), register: state.registerIndex + 1, stage: 'program', to: { ...robot.position }, fromDirection, toDirection: robot.direction, source: 'program' });
     return;
   }
   let steps = Math.abs(card.distance ?? 0);
@@ -247,8 +248,15 @@ function moveRobot(state: MatchState, course: CourseDefinition, robot: RobotStat
   if (occupant && !moveRobot(state, course, occupant, direction, events, 'push')) return false;
   const from = { ...robot.position };
   robot.position = destination;
-  const movementType = source === 'program' ? 'move' : source;
-  events.push({ ...event(movementType, `${robot.displayName} moved.`, robot), from, to: { ...destination } });
+  const movementType = source === 'program' ? 'move' : source === 'express-conveyor' ? 'conveyor' : source;
+  const stage: MatchEvent['stage'] = source === 'program' || source === 'push'
+    ? 'program'
+    : source === 'express-conveyor'
+      ? 'express-conveyor'
+      : source === 'conveyor'
+      ? 'conveyor'
+      : 'pushers';
+  events.push({ ...event(movementType, `${robot.displayName} moved.`, robot), register: state.registerIndex + 1, stage, source, from, to: { ...destination }, path: [from, { ...destination }], fromDirection: robot.direction, toDirection: robot.direction });
   if (hasOption(robot, 'ramming-gear') && occupant) takeDamage(occupant, 1, events, 'Ramming Gear');
   if (!insideCourse(course, destination) || courseTile(course, destination.x, destination.y)?.pit) destroyRobot(robot, events, 'factory hazard');
   return true;
@@ -262,7 +270,7 @@ function moveConveyors(state: MatchState, course: CourseDefinition, speed: 1 | 2
   for (const robot of orderByDock(state, candidates)) {
     const conveyor = courseTile(course, robot.position.x, robot.position.y)?.conveyor;
     if (!conveyor) continue;
-    if (moveRobot(state, course, robot, conveyor.direction, events, 'conveyor')) {
+    if (moveRobot(state, course, robot, conveyor.direction, events, expressOnly ? 'express-conveyor' : 'conveyor')) {
       const landed = courseTile(course, robot.position.x, robot.position.y)?.conveyor;
       if (landed?.rotate && robot.optionState.gyroscopicStabilizer !== true) turnRobot(robot, landed.rotate === 'right' ? 1 : -1);
     }
@@ -281,7 +289,9 @@ function rotateGears(state: MatchState, course: CourseDefinition, events: MatchE
     const gear = courseTile(course, robot.position.x, robot.position.y)?.gear;
     if (gear && robot.optionState.gyroscopicStabilizer !== true) {
       turnRobot(robot, gear === 'right' ? 1 : -1);
-      events.push(event('gear', `${robot.displayName} was rotated by a gear.`, robot));
+      const toDirection = robot.direction;
+      const fromDirection = DIRECTIONS[(DIRECTIONS.indexOf(toDirection) + (gear === 'right' ? 3 : 1)) % 4];
+      events.push({ ...event('gear', `${robot.displayName} was rotated by a gear.`, robot), register: state.registerIndex + 1, stage: 'gears', fromDirection, toDirection, source: `gear-${gear}` });
     }
   }
 }
@@ -294,19 +304,32 @@ function fireLasers(state: MatchState, course: CourseDefinition, events: MatchEv
   };
   for (const shooter of liveRobots(state).filter((robot) => !robot.poweredDown)) {
     const facing = (shooter.optionState.turretDirection as Direction | undefined) ?? shooter.direction;
-    traceLaser(state, course, shooter.position, facing, shooter.seatId, hasOption(shooter, 'high-power-laser') ? 1 : 0).forEach((target) => queueDamage(target, hasOption(shooter, 'double-barrel-laser') ? 2 : 1, facing));
-    if (hasOption(shooter, 'rear-laser')) traceLaser(state, course, shooter.position, OPPOSITE[shooter.direction], shooter.seatId).forEach((target) => queueDamage(target, 1, OPPOSITE[shooter.direction]));
+    const forward = traceLaser(state, course, shooter.position, facing, shooter.seatId, hasOption(shooter, 'high-power-laser') ? 1 : 0);
+    events.push({ ...event('laser-fired', `${shooter.displayName} fired.`, shooter), register: state.registerIndex + 1, stage: 'lasers', source: 'robot', path: forward.path, from: { ...shooter.position }, toDirection: facing, data: { count: hasOption(shooter, 'double-barrel-laser') ? 2 : 1 } });
+    forward.hits.forEach((target) => queueDamage(target, hasOption(shooter, 'double-barrel-laser') ? 2 : 1, facing));
+    if (hasOption(shooter, 'rear-laser')) {
+      const direction = OPPOSITE[shooter.direction];
+      const rear = traceLaser(state, course, shooter.position, direction, shooter.seatId);
+      events.push({ ...event('laser-fired', `${shooter.displayName} fired its rear laser.`, shooter), register: state.registerIndex + 1, stage: 'lasers', source: 'rear-laser', path: rear.path, from: { ...shooter.position }, toDirection: direction, data: { count: 1 } });
+      rear.hits.forEach((target) => queueDamage(target, 1, direction));
+    }
   }
   const bounds = courseBounds(course);
   for (let y = 0; y < bounds.height; y += 1) for (let x = 0; x < bounds.width; x += 1) {
     const laser = courseTile(course, x, y)?.laser;
-    if (laser) traceLaser(state, course, { x, y }, laser.direction).slice(0, 1).forEach((target) => queueDamage(target, laser.count, laser.direction));
+    if (laser) {
+      const origin = { x, y };
+      const beam = traceLaser(state, course, origin, laser.direction);
+      events.push({ ...event('laser-fired', 'A factory laser fired.'), register: state.registerIndex + 1, stage: 'lasers', source: 'factory', path: beam.path, from: origin, toDirection: laser.direction, data: { count: laser.count } });
+      beam.hits.slice(0, 1).forEach((target) => queueDamage(target, laser.count, laser.direction));
+    }
   }
   for (const [seatId, hit] of damage) takeDamage(robotFor(state, seatId), hit.amount, events, 'laser', hit.incoming);
 }
 
-function traceLaser(state: MatchState, course: CourseDefinition, origin: Position, direction: Direction, ignoreSeat?: string, penetration = 0): RobotState[] {
+function traceLaser(state: MatchState, course: CourseDefinition, origin: Position, direction: Direction, ignoreSeat?: string, penetration = 0): { hits: RobotState[]; path: Position[] } {
   const hits: RobotState[] = [];
+  const path: Position[] = [{ ...origin }];
   let position = { ...origin };
   for (let guard = 0; guard < 32; guard += 1) {
     if (blockedByWall(course, position, direction)) {
@@ -315,6 +338,7 @@ function traceLaser(state: MatchState, course: CourseDefinition, origin: Positio
     }
     position = { x: position.x + VECTORS[direction].x, y: position.y + VECTORS[direction].y };
     if (!insideCourse(course, position)) break;
+    path.push({ ...position });
     const target = robotAt(state, position, ignoreSeat);
     if (target) {
       hits.push(target);
@@ -322,7 +346,7 @@ function traceLaser(state: MatchState, course: CourseDefinition, origin: Positio
       penetration -= 1;
     }
   }
-  return hits;
+  return { hits, path };
 }
 
 function touchBoardSites(state: MatchState, course: CourseDefinition, events: MatchEvent[]) {
@@ -334,10 +358,10 @@ function touchBoardSites(state: MatchState, course: CourseDefinition, events: Ma
     const adjacentFlag = hasOption(robot, 'mechanical-arm') && course.checkpoints.some((flag) => flag.number === needed && manhattan(flag, robot.position) === 1 && !blockedBetween(course, robot.position, flag));
     if (tile?.checkpoint === needed || adjacentFlag) {
       robot.checkpoint = needed;
-      events.push(event('checkpoint', `${robot.displayName} reached checkpoint ${needed}.`, robot));
+      events.push({ ...event('checkpoint', `${robot.displayName} reached checkpoint ${needed}.`, robot), register: state.registerIndex + 1, stage: 'sites', to: { ...robot.position }, source: 'checkpoint' });
       if (needed === course.checkpoints.length) {
         state.phase = 'complete'; state.winnerSeatId = robot.seatId; state.completedAt = Date.now();
-        events.push(event('victory', `${robot.displayName} wins the race!`, robot));
+        events.push({ ...event('victory', `${robot.displayName} wins the race!`, robot), register: state.registerIndex + 1, stage: 'sites', to: { ...robot.position }, source: 'checkpoint' });
       }
     }
     if (tile?.archive || tile?.checkpoint) robot.archive = { ...robot.position };
@@ -356,7 +380,7 @@ function cleanup(state: MatchState, course: CourseDefinition, events: MatchEvent
         const optionId = state.optionDeck.shift()!;
         const definition = OPTION_BY_ID.get(optionId)!;
         robot.options.push({ id: optionId, charges: definition.charges });
-        events.push(event('option-acquired', `${robot.displayName} installed ${definition.name}.`, robot));
+        events.push({ ...event('option-acquired', `${robot.displayName} installed ${definition.name}.`, robot), stage: 'cleanup', to: { ...robot.position }, source: 'option-site' });
       }
     }
     updateLockedRegisters(robot);
@@ -368,7 +392,7 @@ function cleanup(state: MatchState, course: CourseDefinition, events: MatchEvent
       robot.poweredDown = true;
       robot.damage = 0;
       robot.registers.forEach((register) => { register.locked = false; register.card = null; });
-      events.push(event('power-down', `${robot.displayName} powered down and repaired fully.`, robot));
+      events.push({ ...event('power-down', `${robot.displayName} powered down and repaired fully.`, robot), stage: 'cleanup', to: { ...robot.position }, source: 'power-down' });
     }
     if (hasOption(robot, 'circuit-breaker') && robot.damage >= 3) robot.powerDownNext = true;
   }
@@ -414,7 +438,7 @@ export function takeDamage(robot: RobotState, amount: number, events: MatchEvent
   if (robot.poweredDown && hasOption(robot, 'power-down-shield')) applied = Math.max(0, applied - 1);
   if (incoming && robot.optionState.shieldDirection === incoming) applied = Math.max(0, applied - 1);
   robot.damage += applied;
-  if (applied) events.push({ ...event('damage', `${robot.displayName} took ${applied} damage from ${source}.`, robot), damage: applied });
+  if (applied) events.push({ ...event('damage', `${robot.displayName} took ${applied} damage from ${source}.`, robot), damage: applied, source, to: { ...robot.position } });
   if (robot.damage >= 10) destroyRobot(robot, events, 'critical damage');
 }
 
@@ -424,10 +448,11 @@ function destroyRobot(robot: RobotState, events: MatchEvent[], cause: string) {
   robot.lives -= 1;
   if (robot.options.length) robot.options.splice(0, 1);
   if (robot.lives <= 0) robot.eliminated = true;
-  events.push(event(robot.eliminated ? 'eliminated' : 'destroyed', `${robot.displayName} was ${robot.eliminated ? 'eliminated' : 'destroyed'} by ${cause}.`, robot));
+  events.push({ ...event(robot.eliminated ? 'eliminated' : 'destroyed', `${robot.displayName} was ${robot.eliminated ? 'eliminated' : 'destroyed'} by ${cause}.`, robot), stage: 'cleanup', from: { ...robot.position }, source: cause });
 }
 
 function respawnRobot(state: MatchState, course: CourseDefinition, robot: RobotState, events: MatchEvent[]) {
+  const from = { ...robot.position };
   const candidates = [robot.archive, ...DIRECTIONS.map((direction) => ({ x: robot.archive.x + VECTORS[direction].x, y: robot.archive.y + VECTORS[direction].y }))];
   const position = candidates.find((candidate) => insideCourse(course, candidate) && !courseTile(course, candidate.x, candidate.y)?.pit && !robotAt(state, candidate, robot.seatId));
   if (!position) return;
@@ -436,7 +461,7 @@ function respawnRobot(state: MatchState, course: CourseDefinition, robot: RobotS
   robot.damage = hasOption(robot, 'superior-archive-copy') ? 0 : 2;
   robot.registers.forEach((register) => { register.card = null; register.locked = false; });
   robot.options = robot.options.filter((option) => option.id !== 'superior-archive-copy');
-  events.push({ ...event('respawn', `${robot.displayName} returned from its archive copy.`, robot), to: { ...position } });
+  events.push({ ...event('respawn', `${robot.displayName} returned from its archive copy.`, robot), stage: 'cleanup', source: 'archive-copy', from, to: { ...position }, path: [from, { ...position }], fromDirection: robot.direction, toDirection: robot.direction });
 }
 
 export function updateLockedRegisters(robot: RobotState) {
@@ -580,7 +605,10 @@ export function privateView(state: MatchState, seatId: string, events: MatchEven
 }
 
 function finalizeEvents(state: MatchState, events: MatchEvent[]) {
-  for (const item of events) item.revision = ++state.eventRevision;
+  for (const [ordinal, item] of events.entries()) {
+    item.revision = ++state.eventRevision;
+    item.ordinal = ordinal;
+  }
   return events;
 }
 
