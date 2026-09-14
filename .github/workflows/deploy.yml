@@ -1,0 +1,60 @@
+name: Deploy AILO Game
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ailo-game-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate production game config
+        if: github.event_name != 'pull_request' && github.repository != 'Rabbit57/ailo-game-template'
+        run: npm run check:config
+
+      - name: Deploy to Cloudflare Workers
+        if: github.event_name != 'pull_request' && github.repository != 'Rabbit57/ailo-game-template'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy
