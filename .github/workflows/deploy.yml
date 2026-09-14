@@ -42,6 +42,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Test rules engine
+        run: npm test
+
       - name: Lint
         run: npm run lint
 
@@ -57,4 +60,8 @@ jobs:
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: deploy
+          command: deploy --config dist/server/wrangler.json
+
+      - name: Smoke-test production
+        if: github.event_name != 'pull_request' && github.repository != 'Rabbit57/ailo-game-template'
+        run: npm run smoke:production

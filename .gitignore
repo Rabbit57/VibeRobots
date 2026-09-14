@@ -1,7 +1,12 @@
 node_modules/
 dist/
 .vinext/
+.next/
 .wrangler/
+test-results/
+playwright-report/
+*.tsbuildinfo
+worker-configuration.d.ts
 .env
 .env.*
 !.env.example

@@ -1,5 +1,5 @@
 {
-  "name": "ailo-game-template",
+  "name": "vibe-robots",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,18 +10,26 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "test:browser": "playwright test",
+    "typegen": "wrangler types --config dist/server/wrangler.json worker-configuration.d.ts",
+    "smoke:production": "node scripts/smoke-production.mjs",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint app components scripts ailo.config.ts vite.config.ts",
+    "lint": "oxlint app components game worker tests scripts ailo.config.ts vite.config.ts playwright.config.ts",
     "format": "oxfmt .",
     "check:config": "node --experimental-strip-types scripts/check-config.mjs"
   },
   "dependencies": {
+    "@react-three/drei": "10.7.8",
+    "@react-three/fiber": "9.7.0",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "react-server-dom-webpack": "19.2.6",
+    "three": "0.186.0",
     "vinext": "1.0.0-beta.5"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@cloudflare/vite-plugin": "1.37.1",
     "@cloudflare/workers-types": "4.20260515.1",
     "@types/node": "22.19.19",
@@ -32,6 +40,7 @@
     "oxfmt": "0.61.0",
     "oxlint": "1.76.0",
     "oxlint-tsgolint": "7.0.2001",
+    "tsx": "4.21.0",
     "typescript": "5.9.3",
     "vite": "8.0.13",
     "wrangler": "4.92.0"

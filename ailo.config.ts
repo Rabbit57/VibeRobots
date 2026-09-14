@@ -5,11 +5,10 @@ export const ailoCloudflare = {
 } as const;
 
 export const ailoGame = {
-  // Change this before deploying a real game.
-  // Lowercase letters/numbers with single hyphens only.
-  slug: 'change-me',
-  title: 'AILO Game',
-  description: 'Replace this starter with your next browser game.',
+  slug: 'vibe-robots',
+  title: 'Vibe Robots',
+  description:
+    'Out-program your rivals in a dangerous online factory race for 2–8 players.',
 } as const;
 
 export const ailoWorkerName = `ailo-${ailoGame.slug}`;
