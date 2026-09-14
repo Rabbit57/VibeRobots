@@ -1,21 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { BoardLegend, ProgramArt, TurnTimeline, actionDescription } from "./game-details";
+import { PROGRAM_HELP, robotInspection, TURN_STAGES } from "@/game/inspection";
 import { BOARD_BY_ID, COURSES } from "@/game/content/boards";
 import { OPTION_BY_ID } from "@/game/content/options";
 import { PROGRAM_LABELS } from "@/game/content/programs";
 import { ROBOTS, ROBOT_BY_ID } from "@/game/content/robots";
 import type { MatchEvent, PrivateMatchView, ProgramCard, PublicRobotView } from "@/game/types";
 
-const ICONS: Record<string, string> = {
-  move1: "↑",
-  move2: "⇈",
-  move3: "⇈",
-  backup: "↓",
-  left: "↶",
-  right: "↷",
-  uturn: "↻",
-};
 const COURSE_IMAGES: Record<string, string> = {
   "risky-exchange": "0%",
   "dizzy-dash": "50%",
@@ -27,6 +20,8 @@ export interface PlaybackView {
   active?: { event: MatchEvent; durationMs: number };
   remaining: number;
   playing: boolean;
+  presented?: boolean;
+  onPresented?: (revision: number) => void;
 }
 
 export function HomePanel(props: {
@@ -347,19 +342,28 @@ export function MatchHud({
       : robot.registers;
   const canEdit =
     !playback.playing && !robot.finishedProgramming && view.public.phase === "programming";
+  const displayedHand = useRef(view.hand);
+  if (canEdit) displayedHand.current = view.hand;
   const targetSeatId = view.public.robots.find(
     (candidate) => candidate.seatId !== view.seatId && !candidate.eliminated,
   )?.seatId;
   return (
     <>
+      <TurnTimeline playback={playback} />
       <aside className="roster-panel" aria-label="Drivers">
         <p className="section-label">
-          THE LITTLE CREW <span>{sceneRobots.length} DRIVERS</span>
+          RACE CREW <span>{sceneRobots.length} DRIVERS</span>
         </p>
         {sceneRobots.map((entry) => {
           const identity = ROBOT_BY_ID.get(entry.robotId)!;
           return (
-            <div className={entry.seatId === view.seatId ? "you" : ""} key={entry.seatId}>
+            <div
+              className={entry.seatId === view.seatId ? "you" : ""}
+              key={entry.seatId}
+              tabIndex={0}
+              data-help-title={robotInspection(entry).title}
+              data-help={robotInspection(entry).detail}
+            >
               <img src={identity.portraitUrl} alt="" />
               <span>
                 <strong>
@@ -367,8 +371,11 @@ export function MatchHud({
                   {entry.seatId === view.seatId && <b className="you-badge">YOU</b>}
                 </strong>
                 <small>
-                  {entry.controller === "bot" ? "CPU · " : ""}♥ {entry.lives}　⚡ {entry.damage}　⚑{" "}
-                  {entry.checkpoint}
+                  {entry.controller === "bot" ? "CPU · " : ""}
+                  {entry.lives} lives · {entry.damage}/10 damage
+                  <span className="roster-progress">
+                    ⚑ {entry.checkpoint}/3 checkpoints · {entry.direction}
+                  </span>
                 </small>
               </span>
               <i className={entry.connected ? "online" : ""} />
@@ -377,6 +384,10 @@ export function MatchHud({
         })}
       </aside>
       <aside className="drawer-stack">
+        <details className="hud-drawer">
+          <summary>Board field guide</summary>
+          <BoardLegend />
+        </details>
         {view.options.length > 0 && (
           <details className="hud-drawer">
             <summary>
@@ -417,9 +428,12 @@ export function MatchHud({
         </details>
       </aside>
       {playback.playing && (
-        <div className="action-toast" role="status" key={playback.active?.event.revision}>
-          <small>{playback.active?.event.stage ?? "factory sequence"}</small>
-          <strong>{playback.active?.event.message ?? "Winding the gears…"}</strong>
+        <div className="action-toast" role="status">
+          <small>
+            {TURN_STAGES.find((stage) => stage.id === playback.active?.event.stage)?.label ??
+              "Factory sequence"}
+          </small>
+          <strong>{actionDescription(playback.active?.event, sceneRobots)}</strong>
           <span>{playback.remaining + 1} actions queued</span>
         </div>
       )}
@@ -429,14 +443,30 @@ export function MatchHud({
             <p className="kicker">YOUR FIVE-STEP PLAN</p>
             <span>
               {playback.playing
-                ? "The factory is acting it out…"
-                : `Choose ${unlocked} cards in execution order. Keys 1–9 select; Enter submits.`}
+                ? "Follow the highlighted register and the factory sequence above."
+                : `Choose ${unlocked} cards in order. Higher priority moves first. Keys 1–9 · Enter to lock in.`}
             </span>
           </div>
-          <div className="damage-meter" aria-label={`${robot.damage} damage`}>
-            <small>DAMAGE</small>
+          <div
+            className="damage-meter"
+            data-help-title="Damage & locked registers"
+            data-help="Each damage removes one card from your next hand. At 5–9 damage, the last registers lock. At 10, your robot is destroyed. Repair stations or powering down heal damage."
+            aria-label={`${robot.damage} damage`}
+          >
+            <small>
+              DAMAGE{" "}
+              <b>{sceneRobots.find((r) => r.seatId === view.seatId)?.damage ?? robot.damage}/10</b>
+            </small>
             {Array.from({ length: 10 }, (_, index) => (
-              <i key={index} className={index < robot.damage ? "hit" : ""} />
+              <i
+                key={index}
+                className={
+                  index <
+                  (sceneRobots.find((r) => r.seatId === view.seatId)?.damage ?? robot.damage)
+                    ? "hit"
+                    : ""
+                }
+              />
             ))}
           </div>
         </div>
@@ -450,23 +480,41 @@ export function MatchHud({
               <div
                 className={`register ${register.locked ? "locked" : card ? "filled" : ""} ${playback.active?.event.register === index + 1 ? "executing" : ""}`}
                 key={index}
+                data-help-title={`Register ${index + 1}${register.locked ? " · Locked" : ""}`}
+                data-help={
+                  card
+                    ? `${PROGRAM_HELP[card.kind]} Priority ${card.priority}. ${register.locked ? "This register is locked by damage and repeats its previous card." : "Use the arrows to reorder, or × to remove."}`
+                    : "Choose a card from your hand to fill this step. Registers execute from left to right."
+                }
               >
                 <b>{index + 1}</b>
                 {register.locked && <span className="lock">LOCKED</span>}
                 {card ? (
                   <>
-                    <strong>{ICONS[card.kind]}</strong>
+                    <ProgramArt kind={card.kind} />
                     <small>{PROGRAM_LABELS[card.kind]}</small>
                     <em>{card.priority}</em>
                     {!register.locked && canEdit && (
                       <div>
-                        <button onClick={() => moveSelected(card.id, -1)} aria-label="Move earlier">
+                        <button
+                          onClick={() => moveSelected(card.id, -1)}
+                          aria-label="Move earlier"
+                          data-help="Move this card one register earlier."
+                        >
                           ‹
                         </button>
-                        <button onClick={() => toggle(card)} aria-label="Remove card">
+                        <button
+                          onClick={() => toggle(card)}
+                          aria-label="Remove card"
+                          data-help="Return this card to your hand."
+                        >
                           ×
                         </button>
-                        <button onClick={() => moveSelected(card.id, 1)} aria-label="Move later">
+                        <button
+                          onClick={() => moveSelected(card.id, 1)}
+                          aria-label="Move later"
+                          data-help="Move this card one register later."
+                        >
                           ›
                         </button>
                       </div>
@@ -480,9 +528,11 @@ export function MatchHud({
           })}
         </div>
         <div className="hand-row" aria-label="Program card hand">
-          {view.hand.map((card, index) => (
+          {displayedHand.current.map((card, index) => (
             <button
               aria-label={`${PROGRAM_LABELS[card.kind]}, priority ${card.priority}`}
+              data-help-title={`${PROGRAM_LABELS[card.kind]} · Priority ${card.priority}`}
+              data-help={`${PROGRAM_HELP[card.kind]} Higher priority cards execute first within each register.${selected.includes(card.id) ? ` Assigned to register ${selected.indexOf(card.id) + 1}. Click to remove.` : " Click to add to the next empty register."}`}
               aria-pressed={selected.includes(card.id)}
               className={`program-card ${selected.includes(card.id) ? "selected" : ""} type-${card.kind}`}
               onClick={() => toggle(card)}
@@ -490,6 +540,9 @@ export function MatchHud({
               disabled={!canEdit}
             >
               <kbd>{index + 1}</kbd>
+              {selected.includes(card.id) && (
+                <b className="card-assigned">R{selected.indexOf(card.id) + 1} ✓</b>
+              )}
               <span className="card-category">
                 {card.kind.startsWith("move")
                   ? "TRAVEL"
@@ -497,8 +550,17 @@ export function MatchHud({
                     ? "REVERSE"
                     : "ROTATE"}
               </span>
-              <strong>{ICONS[card.kind]}</strong>
+              <ProgramArt kind={card.kind} />
               <span>{PROGRAM_LABELS[card.kind]}</span>
+              <small className="card-instruction">
+                {card.kind.startsWith("move")
+                  ? `${card.kind.slice(-1)} square${card.kind === "move1" ? "" : "s"} forward`
+                  : card.kind === "backup"
+                    ? "1 square backward"
+                    : card.kind === "uturn"
+                      ? "180° turn"
+                      : "90° turn"}
+              </small>
               <em>
                 <span>PRIORITY</span> {card.priority}
               </em>
@@ -524,13 +586,18 @@ export function MatchHud({
           <div className="console-actions">
             <button
               type="button"
+              data-help-title="Power down next turn"
+              data-help="Skip programming next turn to fully repair your robot. Belts, pushers and lasers still affect you while powered down."
               className={robot.powerDownNext ? "active" : ""}
               disabled={playback.playing}
               onClick={() => powerDown(!robot.powerDownNext)}
             >
               POWER DOWN NEXT TURN
             </button>
-            <label>
+            <label
+              data-help-title="Reduced motion"
+              data-help="Keep the action explanations while disabling travel animations, particles and idle movement."
+            >
               <input
                 type="checkbox"
                 checked={reducedMotion}
@@ -546,10 +613,10 @@ export function MatchHud({
               }
               onClick={submit}
             >
-              {robot.finishedProgramming
-                ? "PLAN LOCKED"
-                : playback.playing
-                  ? "ROBOTS AT WORK"
+              {playback.playing
+                ? "ROBOTS AT WORK"
+                : robot.finishedProgramming
+                  ? "PLAN LOCKED"
                   : `LOCK IN ${selected.length}/${unlocked}`}{" "}
               <span>→</span>
             </button>
@@ -692,13 +759,28 @@ export function LegalPanel({ close }: { close: () => void }) {
   );
 }
 
-export function CourseChip({ courseId }: { courseId: string }) {
+export function CourseChip({
+  courseId,
+  preview,
+  openMap,
+}: {
+  courseId: string;
+  preview?: boolean;
+  openMap: () => void;
+}) {
   const course = COURSES.find((candidate) => candidate.id === courseId) ?? COURSES[0];
   return (
     <div className="course-chip">
-      <small>NOW RACING</small>
+      <small>{preview ? "COURSE PREVIEW" : "NOW RACING"}</small>
       <strong>{course.name}</strong>
       <span>{course.boards.map((board) => BOARD_BY_ID.get(board.boardId)?.name).join(" + ")}</span>
+      <button
+        type="button"
+        onClick={openMap}
+        data-help="Open the exact course layout. Inspect every square, checkpoint and hazard before planning your route."
+      >
+        Explore map ↗
+      </button>
     </div>
   );
 }

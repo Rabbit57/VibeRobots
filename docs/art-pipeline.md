@@ -32,41 +32,47 @@ board kit. `tools/blender/build_garden.py` writes the five-prop garden kit.
 Editable `.blend` source scenes are saved under `art/blender/source`.
 
 Static robot parts and garden props are joined by material to reduce draw calls.
-RobotRoot owns eight shared animation clips: idle, move, turn, bump, hit,
-power-down, respawn, and victory. Blender front is converted to the game's
-north-facing convention with a presentation-only half-turn wrapper.
+Robot shells use smoother enamel, machined bezels, service panels, fasteners,
+running lights, wheel hubs and tire treads. The eight source animation clips remain
+in the GLBs for editing, but runtime motion has one controller. Blender front is
+converted to the game's north-facing convention with a half-turn wrapper.
 
 ## Motion and presentation
 
-- Slow idle breathing and swaying keep the robots alive during planning.
-- Board arrows drift gently along conveyor directions; toothed gears turn when
-  the gear stage runs.
-- Moves use short eased translations, heading changes, and a little bounce.
-- Impacts, destruction, checkpoint collection, and respawns emit colored particles.
-- Lasers use a coral beam and bright core; checkpoints and victories play soft
-  synthesized chimes. The sound toggle controls all game audio.
-- The launch art drifts slowly with falling petals. Cards lift on hover, selected
-  registers pop into place, and the finish screen floats the robot portrait.
-- Reduced motion disables ambient motion, camera following, and GLB animation;
-  game events still complete and remain readable. Eco mode omits ambient motion,
-  shadows, and some scenery. Static fixtures disable ambient scene animation for
-  reproducible screenshots.
-
-The authoritative engine is unchanged. The presentation queue now gives each
-active action its own timer, so changing queue state cannot cancel playback.
-Submitted register cards remain visible while a plan executes.
+- Movement uses absolute smoothstep interpolation over an 850 ms action, with a
+  short hold at its destination. Turns take 750 ms. Fast playback is 2.5×.
+- Small suspension and impact movements act on an inner group. They never alter
+  the robot's board position. No GLB root animation competes with travel.
+- Each action waits for the 3D scene to acknowledge its revision before its timer
+  starts. Events advance atomically; authority reconciles only after the queue
+  drains. The submitted program and its hand remain visible during execution.
+- The engine emits every register stage, even when no robot is affected, plus
+  explicit heading changes at conveyor bends. The HUD follows these events.
+- Camera movement is manual. Center restores an overview; drag or scroll explores.
+- Reduced motion removes travel and ambient effects while retaining reading time.
+  Auto uses Eco on software WebGL renderers; High keeps full detail and shadows.
+- Printed conveyor surfaces use amber single arrows for normal belts and blue
+  double arrows with 2× labels for express belts. Pits use hazard stripes; repairs,
+  upgrades, docks, gears and laser emplacements have their own markings.
+- Board markings are procedurally drawn canvas textures, batched by symbol using
+  instanced meshes. Laser barrels and checkpoint flags are actual 3D geometry.
+- Hover and keyboard tooltips explain controls and cards. Raycast inspection
+  explains board tiles and robots; the accessible tactical map uses the same
+  course data and descriptors as the live board, including rotated boards.
 
 ## Validation
 
 `npm run assets:validate` checks ten GLBs, all eight clip names, required board
 and garden nodes, triangle and file-size limits, editable sources, and runtime
-artwork. Total GLB payload remains below 6 MB and each generated runtime image
+artwork. Total GLB payload is 6.33 MB, below the 7 MB budget and each generated runtime image
 is below 700 KB. The renderer exposes frame, call, and triangle counts through
 `window.__VIBE_PERF__` in development. Ambient mode intentionally renders while
 visible; reduced-motion and eco scenes settle back to demand rendering.
 
 `tests/e2e/visual.spec.ts` covers home, lobby, programming, lasers, destruction,
 respawn, victory, solo victory, and defeat at desktop and landscape tablet sizes.
+`tests/e2e/interaction.spec.ts` also checks live course switching, exact map
+inspection, card selection, fitted controls, and intermediate robot positions.
 The solo browser test waits for the visual queue to drain before reconnection,
 in addition to checking authoritative CPU turn resolution. Review screenshots
 are in `artifacts/visual-slice`.

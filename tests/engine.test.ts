@@ -51,7 +51,7 @@ describe('movement, board order, and damage', () => {
     setProgram(state, 'seat-a', [p(840), null, null, null, null]);
     setProgram(state, 'seat-b', [p(490), null, null, null, null]);
     const events = resolveTurn(state);
-    assert.equal(events[0].seatId, 'seat-a');
+    assert.equal(events.find(event => event.type === 'program')?.seatId, 'seat-a');
     assert.ok(events.some((event) => event.type === 'push' && event.seatId === 'seat-b'));
     assert.equal(new Set(state.robots.filter((robot) => !robot.destroyed).map((robot) => `${robot.position.x},${robot.position.y}`)).size, state.robots.filter((robot) => !robot.destroyed).length);
   });
@@ -85,6 +85,19 @@ describe('movement, board order, and damage', () => {
     assert.equal(laser?.stage, 'lasers');
     assert.ok(['robot', 'rear-laser', 'factory'].includes(laser?.source ?? ''));
     assert.ok(laser?.toDirection);
+  });
+
+  test('conveyor bends emit the actual heading change for playback', () => {
+    const state = started('against-the-grain');
+    Object.assign(state.robots[0], { position: { x: 6, y: 10 }, direction: 'north' });
+    Object.assign(state.robots[1], { position: { x: 0, y: 24 } });
+    for (const robot of state.robots) setProgram(state, robot.seatId, [null, null, null, null, null]);
+    const events = resolveTurn(state);
+    const bend = events.find(event => event.source === 'conveyor-bend' && event.seatId === 'seat-a');
+    assert.equal(bend?.fromDirection, 'north');
+    assert.equal(bend?.toDirection, 'east');
+    assert.equal(bend?.stage, 'express-conveyor');
+    assert.equal(bend?.register, 1);
   });
 
   test('checkpoints, archives, repair and victory use register/cleanup timing', () => {
@@ -180,10 +193,11 @@ describe('authority, redaction, and deterministic replay', () => {
     assert.throws(() => applyCommand(state, 'seat-a', { type: 'program', id: 'again', revision: state.revision, cards: [] }), (error: unknown) => error instanceof RuleError && error.category === 'duplicate');
   });
 
+  // Includes explicit stage announcements and the respawn repair snapshot.
   const expectedGolden: Record<string, string> = {
-    'risky-exchange': '600857c8871f52a8',
-    'dizzy-dash': 'bb3a8067fd3e2924',
-    'against-the-grain': 'e1855c628292a32b',
+    'risky-exchange': '15bbb00e71b8f840',
+    'dizzy-dash': '60bab3f09002cdd7',
+    'against-the-grain': '5e7547a0003f12e5',
   };
   for (const course of COURSES) test(`golden deterministic replay: ${course.name}`, () => {
     const replay = () => {

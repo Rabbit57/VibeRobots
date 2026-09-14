@@ -7,7 +7,10 @@ test.describe('deterministic presentation gallery', () => {
     test(`${state} visual state`, async ({ page }) => {
       await page.goto(`/?visual=${state}`);
       await expect(page.locator('.game-root')).toHaveAttribute('data-visual', state);
-      if (state !== 'home') await expect(page.locator('canvas')).toBeVisible();
+      if (state !== 'home') {
+        await expect(page.locator('canvas')).toBeVisible();
+        await expect(page.locator('.factory-viewport')).toHaveClass(/scene-ready/);
+      }
       await page.waitForTimeout(state === 'home' ? 250 : 1_000);
       await expect(page).toHaveScreenshot(`${state}.png`, {
         animations: 'disabled',

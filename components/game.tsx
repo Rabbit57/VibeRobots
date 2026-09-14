@@ -6,6 +6,7 @@ import { ROBOTS } from "@/game/content/robots";
 import {
   appendPresentationBatch,
   applyPresentationEvent,
+  eventDuration,
   isVisualEvent,
   reconcilePresentation,
   resetPresentation,
@@ -29,6 +30,8 @@ import {
   SoloResultPanel,
   type PlaybackView,
 } from "./game-ui";
+import { CourseMap, GameTooltips, Inspector } from "./game-details";
+import { TURN_STAGES, type Inspection } from "@/game/inspection";
 import type { GraphicsQuality } from "./factory-scene";
 import type { VisualFixture } from "@/game/visual-fixtures";
 
@@ -57,6 +60,9 @@ export function VibeRobotsGame({ title }: { title: string }) {
   const [reducedMotion, setReducedMotion] = useState(false);
   const [legalOpen, setLegalOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
+  const [inspection, setInspection] = useState<Inspection>();
+  const closeMap = useCallback(() => setMapOpen(false), []);
   const closeHelp = useCallback(() => setHelpOpen(false), []);
   const [hydrated, setHydrated] = useState(false);
   const [cameraReset, setCameraReset] = useState(0);
@@ -72,7 +78,11 @@ export function VibeRobotsGame({ title }: { title: string }) {
   const ownRobot = publicState?.robots.find((robot) => robot.seatId === view?.seatId);
   const isHost = publicState?.hostSeatId === view?.seatId;
   const selectedCourse =
-    COURSES.find((course) => course.id === (publicState?.courseId ?? courseId)) ?? COURSES[0];
+    COURSES.find(
+      (course) =>
+        course.id ===
+        (screen === "lobby" && isHost ? courseId : (publicState?.courseId ?? courseId)),
+    ) ?? COURSES[0];
   const markSceneReady = useCallback(
     () => setReadyCourseId(selectedCourse.id),
     [selectedCourse.id],
@@ -145,7 +155,7 @@ export function VibeRobotsGame({ title }: { title: string }) {
   );
 
   useEffect(() => {
-    if (playback.active) playSfx(playback.active.event);
+    if (playback.active && playback.active.event.type !== "stage") playSfx(playback.active.event);
   }, [playback.active?.event.revision, playSfx]);
 
   const connect = useCallback((code: string, seatId: string, seatToken: string) => {
@@ -357,6 +367,7 @@ export function VibeRobotsGame({ title }: { title: string }) {
         !view ||
         playback.playing ||
         helpOpen ||
+        mapOpen ||
         legalOpen ||
         view.public.phase !== "programming" ||
         ownRobot?.finishedProgramming ||
@@ -400,14 +411,21 @@ export function VibeRobotsGame({ title }: { title: string }) {
     }
   }, [view]);
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production")
+      (window as typeof window & { __VIBE_PLAYBACK__?: PlaybackView }).__VIBE_PLAYBACK__ = playback;
+  }, [playback]);
+
   const showScene = Boolean(view) && screen !== "home";
   return (
     <div
+      data-playback={playback.playing ? "playing" : "idle"}
       className={`game-root ${fast ? "speed-fast" : ""} ${reducedMotion ? "reduce-motion" : ""}`}
       data-screen={screen}
       data-ready={hydrated}
       data-visual={visualFixture?.mode}
     >
+      <GameTooltips />
       <div className="phone-gate">
         <span className="phone-robot">◉‿◉</span>
         <h1>Factory floor too small</h1>
@@ -432,10 +450,10 @@ export function VibeRobotsGame({ title }: { title: string }) {
             <small>A LITTLE WORKSHOP ADVENTURE</small>
           </span>
         </button>
-        <div className="status-strip">
+        <div className={`status-strip ${publicState?.phase === "paused" ? "is-paused" : ""}`}>
           <i className={publicState?.phase === "paused" ? "amber" : ""} />
           <span>
-            {playback.playing
+            {publicState?.phase === "paused" ? "Paused · reconnecting" : playback.playing
               ? playbackLabel(playback.active?.event)
               : publicState
                 ? phaseLabel(publicState.phase)
@@ -443,8 +461,14 @@ export function VibeRobotsGame({ title }: { title: string }) {
           </span>
         </div>
         <nav className="top-actions" aria-label="Presentation settings">
-          <button type="button" aria-pressed={fast} onClick={() => setFast(!fast)}>
-            {fast ? "FAST" : "1×"}
+          <button
+            type="button"
+            data-help="Switch between the default cinematic pace and 2.5× faster playback. You can change speed during a turn."
+            data-help-title="Playback speed"
+            aria-pressed={fast}
+            onClick={() => setFast(!fast)}
+          >
+            {fast ? "2.5×" : "1×"}
           </button>
           <button
             type="button"
@@ -453,18 +477,34 @@ export function VibeRobotsGame({ title }: { title: string }) {
               setMuted(!muted);
               playSfx();
             }}
+            data-help="Toggle movement sounds, laser effects and checkpoint chimes."
+            data-help-title="Game sound"
           >
             {muted ? "SOUND OFF" : "SOUND ON"}
           </button>
-          <button type="button" onClick={() => setQuality(nextQuality(quality))}>
+          <button
+            type="button"
+            data-help="Cycle Auto, High and Eco. High adds sharper edges and shadows. Eco reduces graphics cost on slower devices."
+            data-help-title="Graphics quality"
+            onClick={() => setQuality(nextQuality(quality))}
+          >
             GRAPHICS {quality.toUpperCase()}
           </button>
           {showScene && (
-            <button type="button" onClick={() => setCameraReset((value) => value + 1)}>
+            <button
+              type="button"
+              data-help="Reset the camera to show the whole course. Drag to orbit, right-drag to pan, and scroll to zoom."
+              data-help-title="Center the board"
+              onClick={() => setCameraReset((value) => value + 1)}
+            >
               CENTER
             </button>
           )}
-          <button type="button" onClick={() => setHelpOpen(true)}>
+          <button
+            type="button"
+            data-help="Read the rules for programming, factory actions and winning the race."
+            onClick={() => setHelpOpen(true)}
+          >
             HOW TO PLAY
           </button>
         </nav>
@@ -483,7 +523,16 @@ export function VibeRobotsGame({ title }: { title: string }) {
           <Suspense fallback={<SceneLoader />}>
             <FactoryScene
               course={selectedCourse}
-              robots={playback.robots}
+              robots={
+                screen === "lobby"
+                  ? playback.robots.map((robot, index) => ({
+                      ...robot,
+                      position: selectedCourse.docks[index % selectedCourse.docks.length],
+                      direction:
+                        selectedCourse.docks[index % selectedCourse.docks.length].direction,
+                    }))
+                  : playback.robots
+              }
               activeEvent={playback.active?.event}
               stepDurationMs={playback.active?.durationMs ?? 0}
               reducedMotion={reducedMotion}
@@ -492,6 +541,8 @@ export function VibeRobotsGame({ title }: { title: string }) {
               onReady={markSceneReady}
               ownSeatId={view?.seatId}
               ambientMotion={!visualFixture}
+              onInspect={setInspection}
+              onPresented={scheduledPlayback.onPresented}
             />
           </Suspense>
         )}
@@ -513,7 +564,14 @@ export function VibeRobotsGame({ title }: { title: string }) {
             </div>
           </>
         )}
-        {publicState && <CourseChip courseId={selectedCourse.id} />}
+        {publicState && (
+          <CourseChip
+            courseId={selectedCourse.id}
+            preview={screen === "lobby"}
+            openMap={() => setMapOpen(true)}
+          />
+        )}
+        {showScene && <Inspector info={inspection} />}
         {showScene && (
           <div className="scene-hint">
             <span>↔ Drag to explore</span>
@@ -585,6 +643,13 @@ export function VibeRobotsGame({ title }: { title: string }) {
         <SoloResultPanel view={view} returnHome={returnHome} />
       )}
       {helpOpen && <HowToPlay close={closeHelp} />}
+      {mapOpen && (
+        <CourseMap
+          course={selectedCourse}
+          robots={screen === "match" ? playback.robots : []}
+          close={closeMap}
+        />
+      )}
       {screen === "home" && (
         <footer className="home-footer">
           <span>
@@ -611,25 +676,32 @@ function usePresentationPlayback(
   reducedMotion: boolean,
   connectionEpoch: number,
 ): PlaybackView {
-  const [robots, setRobots] = useState<PublicRobotView[]>([]);
-  const [queue, setQueue] = useState<PresentationStep[]>([]);
-  const [active, setActive] = useState<PresentationStep>();
+  const [state, setState] = useState<{
+    robots: PublicRobotView[];
+    queue: PresentationStep[];
+    active?: PresentationStep;
+  }>({ robots: [], queue: [] });
+  const [presentedRevision, acknowledge] = useState<number>();
   const lastQueued = useRef(0);
   const finalRobots = useRef<PublicRobotView[]>([]);
-  const initialized = useRef(false);
   const seenConnectionEpoch = useRef(-1);
 
   useEffect(() => {
-    if (!view) return;
+    if (!view) {
+      acknowledge(undefined);
+      lastQueued.current = 0;
+      seenConnectionEpoch.current = -1;
+      finalRobots.current = [];
+      setState({ robots: [], queue: [] });
+      return;
+    }
     finalRobots.current = view.public.robots;
     if (seenConnectionEpoch.current !== connectionEpoch) {
+      acknowledge(undefined);
       const reset = resetPresentation(view.public.robots, view.public.eventRevision);
       seenConnectionEpoch.current = connectionEpoch;
-      initialized.current = true;
       lastQueued.current = reset.queue.lastRevision;
-      setRobots(reset.robots);
-      setQueue(reset.queue.steps);
-      setActive(undefined);
+      setState({ robots: reset.robots, queue: [] });
       return;
     }
     const batch = appendPresentationBatch(
@@ -638,39 +710,43 @@ function usePresentationPlayback(
       fast ? "fast" : "normal",
       reducedMotion,
     );
-    if (batch.lastRevision !== lastQueued.current) {
-      lastQueued.current = batch.lastRevision;
-      setQueue((current) => [...current, ...batch.steps]);
-    }
-  }, [view, fast, reducedMotion, connectionEpoch]);
+    lastQueued.current = batch.lastRevision;
+    setState((current) => {
+      const queue = [...current.queue, ...batch.steps];
+      if (current.active) return { ...current, queue };
+      const [active, ...rest] = queue;
+      return active
+        ? { robots: applyPresentationEvent(current.robots, active.event), active, queue: rest }
+        : { robots: reconcilePresentation(current.robots, finalRobots.current), queue: [] };
+    });
+  }, [view, connectionEpoch]);
 
+  const durationMs = state.active
+    ? eventDuration(state.active.event, fast ? "fast" : "normal", reducedMotion)
+    : 0;
   useEffect(() => {
-    if (active || queue.length === 0) return;
-    const [next, ...rest] = queue;
-    setQueue(rest);
-    setRobots((current) => applyPresentationEvent(current, next.event));
-    setActive(next);
-  }, [active, queue]);
-
-  useEffect(() => {
-    if (!active) return;
-    const timer = window.setTimeout(() => setActive(undefined), active.durationMs);
+    if (!state.active || presentedRevision !== state.active.event.revision) return;
+    const timer = window.setTimeout(() => {
+      setState((current) => {
+        const [active, ...queue] = current.queue;
+        return active
+          ? { robots: applyPresentationEvent(current.robots, active.event), active, queue }
+          : { robots: reconcilePresentation(current.robots, finalRobots.current), queue: [] };
+      });
+    }, durationMs);
     return () => window.clearTimeout(timer);
-  }, [active]);
-
-  useEffect(() => {
-    if (!active && queue.length === 0 && initialized.current)
-      setRobots((current) => reconcilePresentation(current, finalRobots.current));
-  }, [active, queue.length, view?.public.revision]);
+  }, [state.active, durationMs, presentedRevision]);
 
   const pendingVisuals =
     view?.events.some((event) => event.revision > lastQueued.current && isVisualEvent(event)) ??
     false;
   return {
-    robots,
-    active,
-    remaining: queue.length,
-    playing: Boolean(active || queue.length || pendingVisuals),
+    onPresented: acknowledge,
+    presented: presentedRevision === state.active?.event.revision,
+    robots: state.robots,
+    active: state.active ? { ...state.active, durationMs } : undefined,
+    remaining: state.queue.length,
+    playing: Boolean(state.active || state.queue.length || pendingVisuals),
   };
 }
 
@@ -700,9 +776,8 @@ function phaseLabel(phase: string) {
 
 function playbackLabel(event?: MatchEvent) {
   if (!event) return "Winding the gears";
-  return event.register
-    ? `Register ${event.register} · ${event.stage ?? event.type}`
-    : (event.stage ?? event.type);
+  const label = TURN_STAGES.find((stage) => stage.id === event.stage)?.label ?? event.type;
+  return event.register ? `Register ${event.register} · ${label}` : label;
 }
 
 function nextQuality(quality: GraphicsQuality): GraphicsQuality {

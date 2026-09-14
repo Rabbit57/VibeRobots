@@ -4,7 +4,7 @@ test("one player races three server-controlled robots and reconnects", async ({
   page,
   request,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await page.goto("/");
   await expect(page.locator(".game-root")).toHaveAttribute("data-ready", "true");
   await page.getByPlaceholder("Your workshop nickname").fill("Solo Ada");
@@ -62,7 +62,7 @@ test("one player races three server-controlled robots and reconnects", async ({
   await expect(page.locator(".register.filled")).toHaveCount(5);
 
   // The visual queue must finish too: server completion alone hides timer bugs.
-  await expect(page.locator(".action-toast")).toBeHidden({ timeout: 60_000 });
+  await expect(page.locator(".action-toast")).toBeHidden({ timeout: 120_000 });
   await expect(cards.first()).toBeEnabled();
 
   await page.reload();

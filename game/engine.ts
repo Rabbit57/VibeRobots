@@ -217,17 +217,28 @@ export function resolveTurn(state: MatchState, events: MatchEvent[] = []): Match
     const movers = liveRobots(state)
       .filter((robot) => !robot.poweredDown && robot.registers[registerIndex].card)
       .sort((a, b) => b.registers[registerIndex].card!.priority - a.registers[registerIndex].card!.priority);
+    const stage = (id: MatchEvent['stage'], message: string) => events.push({ ...event('stage', message), register: registerIndex + 1, stage: id });
+    stage('program', `Register ${registerIndex + 1}: robots execute cards in priority order.`);
     for (const robot of movers) executeProgram(state, course, robot, robot.registers[registerIndex].card!, events);
+    stage('express-conveyor', 'Express belts take their extra step.');
     moveConveyors(state, course, 2, true, events);
+    stage('conveyor', 'All conveyor belts advance one square.');
     moveConveyors(state, course, 1, false, events);
+    stage('pushers', 'Active pushers extend.');
     activatePushers(state, course, registerIndex + 1, events);
+    stage('gears', 'Gears rotate robots.');
     rotateGears(state, course, events);
+    stage('lasers', 'Factory and robot lasers fire.');
     fireLasers(state, course, events);
+    stage('sites', 'Check flags and save archive locations.');
     touchBoardSites(state, course, events);
     if (!state.winnerSeatId && finishSoloDefeat(state, events)) break;
     if (state.winnerSeatId) break;
   }
-  if (!state.winnerSeatId && state.completionReason !== 'human-eliminated') cleanup(state, course, events);
+  if (!state.winnerSeatId && state.completionReason !== 'human-eliminated') {
+    events.push({ ...event('stage', 'Turn complete: repair, respawn and deal new cards.'), register: 5, stage: 'cleanup' });
+    cleanup(state, course, events);
+  }
   return events;
 }
 
@@ -290,7 +301,12 @@ function moveConveyors(state: MatchState, course: CourseDefinition, speed: 1 | 2
     if (!conveyor) continue;
     if (moveRobot(state, course, robot, conveyor.direction, events, expressOnly ? 'express-conveyor' : 'conveyor')) {
       const landed = courseTile(course, robot.position.x, robot.position.y)?.conveyor;
-      if (landed?.rotate && robot.optionState.gyroscopicStabilizer !== true) turnRobot(robot, landed.rotate === 'right' ? 1 : -1);
+      if (landed?.rotate && robot.optionState.gyroscopicStabilizer !== true) {
+        const fromDirection = robot.direction;
+        turnRobot(robot, landed.rotate === 'right' ? 1 : -1);
+        events.push({ ...event('turn', `${robot.displayName} turned ${landed.rotate} with the belt.`, robot), register: state.registerIndex + 1,
+          stage: expressOnly ? 'express-conveyor' : 'conveyor', source: 'conveyor-bend', fromDirection, toDirection: robot.direction, to: { ...robot.position } });
+      }
     }
   }
 }
@@ -490,7 +506,7 @@ function respawnRobot(state: MatchState, course: CourseDefinition, robot: RobotS
   robot.damage = hasOption(robot, 'superior-archive-copy') ? 0 : 2;
   robot.registers.forEach((register) => { register.card = null; register.locked = false; });
   robot.options = robot.options.filter((option) => option.id !== 'superior-archive-copy');
-  events.push({ ...event('respawn', `${robot.displayName} returned from its archive copy.`, robot), stage: 'cleanup', source: 'archive-copy', from, to: { ...position }, path: [from, { ...position }], fromDirection: robot.direction, toDirection: robot.direction });
+  events.push({ ...event('respawn', `${robot.displayName} returned from its archive copy.`, robot), stage: 'cleanup', source: 'archive-copy', data: { damage: robot.damage }, from, to: { ...position }, path: [from, { ...position }], fromDirection: robot.direction, toDirection: robot.direction });
 }
 
 export function updateLockedRegisters(robot: RobotState) {

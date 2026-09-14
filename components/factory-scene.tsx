@@ -1,13 +1,16 @@
 "use client";
 
 import { Html, Line, OrbitControls, RoundedBox, useGLTF } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { Canvas, useFrame, useThree, events as createPointerEvents } from "@react-three/fiber";
+import { Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { courseBounds, courseTile } from "@/game/content/boards";
 import { ROBOT_BY_ID } from "@/game/content/robots";
-import { directionAngle, shortestAngle } from "@/game/presentation";
+import { directionAngle, shortestAngle, motionProgress } from "@/game/presentation";
 import type { CourseDefinition, MatchEvent, PublicRobotView } from "@/game/types";
+
+import { BoardSurfaces } from "./board-surfaces";
+import { robotInspection, tileInspection, type Inspection } from "@/game/inspection";
 
 export type GraphicsQuality = "auto" | "high" | "eco";
 
@@ -20,8 +23,10 @@ export interface FactorySceneProps {
   quality: GraphicsQuality;
   cameraReset: number;
   onReady?: () => void;
+  onPresented?: (revision: number) => void;
   ownSeatId?: string;
   ambientMotion?: boolean;
+  onInspect?: (info?: Inspection) => void;
 }
 
 type Kit = { nodes: Record<string, THREE.Mesh> };
@@ -33,26 +38,44 @@ type Instance = {
   color?: string;
   scale?: [number, number, number];
 };
-type Actor = { group: THREE.Group; mixer: THREE.AnimationMixer };
 
 const KIT_URL = "/assets/models/factory-kit.glb";
 const PLUM = "#dce4d7";
 
+// HTML nameplates live inside the canvas event surface. Use viewport coordinates
+// so their nested DOM targets cannot change the raycast origin.
+const boardEvents: typeof createPointerEvents = (store) => ({
+  ...createPointerEvents(store),
+  compute(event, state) {
+    const rect = state.gl.domElement.getBoundingClientRect();
+    state.pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    state.raycaster.setFromCamera(state.pointer, state.camera);
+  },
+});
+
 export function FactoryScene(props: FactorySceneProps) {
-  const dpr =
-    props.quality === "eco" ? 1 : props.quality === "high" ? 1.6 : ([1, 1.4] as [number, number]);
-  const shadowMap = props.quality === "high" ? 2048 : 1024;
+  const [softwareRenderer, setSoftwareRenderer] = useState(false);
+  const quality = props.quality === "auto" && softwareRenderer ? "eco" : props.quality;
+  const dpr = quality === "eco" ? 1 : quality === "high" ? 2 : ([1, 1.7] as [number, number]);
+  const shadowMap = quality === "high" ? 2048 : 1024;
   return (
     <Canvas
       className="factory-canvas"
+      events={boardEvents}
       frameloop="demand"
       dpr={dpr}
-      shadows={props.quality === "eco" ? false : "soft"}
-      camera={{ position: [9, 12, 14], fov: 37, near: 0.1, far: 90 }}
-      gl={{ antialias: props.quality !== "eco", alpha: true, powerPreference: "high-performance" }}
+      shadows={quality === "eco" ? false : "soft"}
+      camera={{ position: [9, 12, 14], fov: 37, near: 0.1, far: 160 }}
+      gl={{ antialias: quality !== "eco", alpha: true, powerPreference: "high-performance" }}
       onCreated={({ gl }) => {
+        const context = gl.getContext();
+        const rendererInfo = context.getExtension("WEBGL_debug_renderer_info");
+        const renderer = rendererInfo
+          ? String(context.getParameter(rendererInfo.UNMASKED_RENDERER_WEBGL))
+          : "";
+        setSoftwareRenderer(/swiftshader|llvmpipe|software/i.test(renderer));
         gl.toneMapping = THREE.ACESFilmicToneMapping;
-        gl.toneMappingExposure = 1.04;
+        gl.toneMappingExposure = 0.95;
         if (process.env.NODE_ENV !== "production") {
           (window as typeof window & { __VIBE_PERF__?: unknown }).__VIBE_PERF__ = {
             renderer: gl.info,
@@ -68,9 +91,9 @@ export function FactoryScene(props: FactorySceneProps) {
       }
     >
       <color attach="background" args={[PLUM]} />
-      <fog attach="fog" args={[PLUM, 32, 68]} />
+      <fog attach="fog" args={[PLUM, 65, 130]} />
       <Suspense fallback={null}>
-        <SceneContent {...props} shadowMap={shadowMap} />
+        <SceneContent {...props} quality={quality} shadowMap={shadowMap} />
       </Suspense>
     </Canvas>
   );
@@ -86,8 +109,10 @@ function SceneContent({
   cameraReset,
   shadowMap,
   onReady,
+  onPresented,
   ownSeatId,
   ambientMotion = true,
+  onInspect,
 }: FactorySceneProps & { shadowMap: number }) {
   const bounds = courseBounds(course);
   const offset = useMemo(
@@ -95,14 +120,25 @@ function SceneContent({
     [bounds.height, bounds.width],
   );
   useEffect(() => onReady?.(), [onReady]);
-  useFrame(({ gl }) => {
+  useLayoutEffect(() => {
+    if (activeEvent) onPresented?.(activeEvent.revision);
+  }, [activeEvent?.revision, onPresented]);
+  useFrame(({ gl, scene, camera }) => {
     if (process.env.NODE_ENV !== "production") {
       const metrics = (
         window as typeof window & {
-          __VIBE_PERF__?: { frames: number; calls?: number; triangles?: number };
+          __VIBE_PERF__?: {
+            frames: number;
+            calls?: number;
+            triangles?: number;
+            scene?: THREE.Scene;
+            camera?: THREE.Camera;
+          };
         }
       ).__VIBE_PERF__;
       if (metrics) {
+        metrics.scene = scene;
+        metrics.camera = camera;
         metrics.frames += 1;
         metrics.calls = gl.info.render.calls;
         metrics.triangles = gl.info.render.triangles;
@@ -111,12 +147,12 @@ function SceneContent({
   });
   return (
     <>
-      <hemisphereLight intensity={1.2} color="#fff2dc" groundColor="#94aa7e" />
+      <hemisphereLight intensity={1.4} color="#fff5e8" groundColor="#879d92" />
       <directionalLight
         castShadow={quality !== "eco"}
         position={[-7, 15, 8]}
-        intensity={2.2}
-        color="#fff1d4"
+        intensity={2.5}
+        color="#ffefd8"
         shadow-mapSize={[shadowMap, shadowMap]}
         shadow-normalBias={0.04}
         shadow-bias={-0.0001}
@@ -128,13 +164,25 @@ function SceneContent({
         shadow-camera-bottom={-18}
       />
       <directionalLight position={[8, 7, -10]} color="#d5ece9" intensity={0.65} />
-      <GardenEnvironment course={course} quality={quality} />
+      <group
+        onPointerMove={(e) => {
+          e.stopPropagation();
+          onInspect?.({
+            title: "Garden workshop",
+            eyebrow: "SCENERY",
+            detail:
+              "The workshop surrounds the race course. Only marked board squares and starting docks can hold robots.",
+          });
+        }}
+        onPointerOut={() => onInspect?.(undefined)}
+      >
+        <GardenEnvironment course={course} quality={quality} />
+      </group>
       <AmbientLife enabled={!reducedMotion && ambientMotion && quality !== "eco"} bounds={bounds} />
       <group position={[offset.x, 0, offset.z]}>
         <FactoryBoard
           course={course}
-          activeEvent={activeEvent}
-          reducedMotion={reducedMotion || !ambientMotion}
+          onInspect={onInspect}
         />
         <RobotFleet
           robots={robots}
@@ -143,6 +191,7 @@ function SceneContent({
           reducedMotion={reducedMotion}
           ownSeatId={ownSeatId}
           ambientMotion={ambientMotion && quality !== "eco"}
+          onInspect={onInspect}
         />
         <EventParticles event={activeEvent} reducedMotion={reducedMotion || !ambientMotion} />
         <LaserEffect event={activeEvent} />
@@ -160,13 +209,12 @@ function SceneContent({
 
 function FactoryBoard({
   course,
-  activeEvent,
-  reducedMotion,
+  onInspect,
 }: {
   course: CourseDefinition;
-  activeEvent?: MatchEvent;
-  reducedMotion: boolean;
+  onInspect?: (info?: Inspection) => void;
 }) {
+  const [hovered, setHovered] = useState<{ x: number; y: number }>();
   const kit = useGLTF(KIT_URL) as unknown as Kit;
   const bounds = courseBounds(course);
   const cells = useMemo(
@@ -190,13 +238,14 @@ function FactoryBoard({
     const pits: Instance[] = [];
     for (const { x, y } of cells) {
       const tile = courseTile(course, x, y);
-      base.push({ x, z: y, color: tile?.pit ? "#4c655a" : (x + y) % 2 ? "#edebd7" : "#fff4db" });
+      base.push({ x, z: y, color: tile?.pit ? "#4c655a" : (x + y) % 2 ? "#dddcd1" : "#f5f0dd" });
       if (tile?.pit) pits.push({ x, z: y, y: 0.09 });
       if (tile?.conveyor)
         (tile.conveyor.speed === 2 ? express : conveyors).push({
           x,
           z: y,
           y: 0.12,
+          color: tile.conveyor.speed === 2 ? "#4aaddb" : "#e9ac4c",
           rotation: directionAngle(tile.conveyor.direction),
         });
       if (tile?.gear)
@@ -251,32 +300,48 @@ function FactoryBoard({
       <Instances
         node={node("gear")}
         items={features.gears}
-        rotationTrigger={
-          activeEvent?.stage === "gears" && !reducedMotion ? activeEvent.revision : undefined
-        }
         castShadow
       />
       <Instances node={node("pusher")} items={features.pushers} castShadow />
-      <Instances node={node("laser")} items={features.lasers} castShadow />
       <Instances node={node("repair")} items={features.repairs} />
 
-      <ConveyorArrows
-        items={[...features.conveyors, ...features.express]}
-        reducedMotion={reducedMotion}
-      />
+      <BoardSurfaces course={course} />
       <CheckpointFlags items={features.checkpoints} />
-      {features.repairs.map((item, index) => (
-        <group key={index} position={[item.x, 0.205, item.z]}>
-          <mesh>
-            <boxGeometry args={[0.35, 0.025, 0.1]} />
-            <meshBasicMaterial color="#f6ffe4" />
-          </mesh>
-          <mesh>
-            <boxGeometry args={[0.1, 0.025, 0.35]} />
-            <meshBasicMaterial color="#f6ffe4" />
-          </mesh>
-        </group>
-      ))}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[(bounds.width - 1) / 2, 0.1, bounds.height / 2]}
+        onPointerMove={(event) => {
+          event.stopPropagation();
+          const local = event.object.parent!.worldToLocal(event.point.clone());
+          const x = Math.round(local.x),
+            y = Math.round(local.z);
+          if (x < 0 || x >= bounds.width || y < 0 || y > bounds.height) return;
+          setHovered((current) => (current?.x === x && current.y === y ? current : { x, y }));
+          onInspect?.(tileInspection(course, x, y));
+        }}
+        onPointerOut={() => {
+          setHovered(undefined);
+          onInspect?.(undefined);
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          const local = event.object.parent!.worldToLocal(event.point.clone());
+          onInspect?.(tileInspection(course, Math.round(local.x), Math.round(local.z)));
+        }}
+      >
+        <planeGeometry args={[bounds.width, bounds.height + 1]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      {hovered && (
+        <mesh
+          position={[hovered.x, 0.27, hovered.y]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          raycast={() => null}
+        >
+          <planeGeometry args={[0.96, 0.96]} />
+          <meshBasicMaterial color="#ffffff" transparent opacity={0.22} depthWrite={false} />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -286,38 +351,13 @@ function Instances({
   items,
   castShadow = false,
   receiveShadow = false,
-  rotationTrigger,
 }: {
   node?: THREE.Mesh;
   items: Instance[];
   castShadow?: boolean;
   receiveShadow?: boolean;
-  rotationTrigger?: number;
 }) {
   const ref = useRef<THREE.InstancedMesh>(null);
-  const rotationStart = useRef(0);
-  const { invalidate } = useThree();
-  useEffect(() => {
-    rotationStart.current = performance.now();
-    invalidate();
-  }, [rotationTrigger, invalidate]);
-  useFrame(() => {
-    if (rotationTrigger === undefined || !ref.current) return;
-    const t = Math.min(1, (performance.now() - rotationStart.current) / 350);
-    const ease = 1 - Math.pow(1 - t, 3);
-    const matrix = new THREE.Matrix4();
-    items.forEach((item, index) => {
-      const angle = (item.rotation ?? 0) + ((item.rotation === 0 ? 1 : -1) * ease * Math.PI) / 2;
-      matrix.compose(
-        new THREE.Vector3(item.x, item.y ?? 0, item.z),
-        new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle),
-        new THREE.Vector3(1, 1, 1),
-      );
-      ref.current!.setMatrixAt(index, matrix);
-    });
-    ref.current.instanceMatrix.needsUpdate = true;
-    if (t < 1) invalidate();
-  });
   const material = useMemo(() => {
     const next =
       (node?.material as THREE.Material | undefined)?.clone() ??
@@ -354,47 +394,6 @@ function Instances({
   );
 }
 
-function ConveyorArrows({ items, reducedMotion }: { items: Instance[]; reducedMotion: boolean }) {
-  const ref = useRef<THREE.InstancedMesh>(null);
-  const geometry = useMemo(() => {
-    const shape = new THREE.Shape();
-    shape.moveTo(-0.15, -0.11);
-    shape.lineTo(0, 0.08);
-    shape.lineTo(0.15, -0.11);
-    shape.lineTo(0.15, 0.01);
-    shape.lineTo(0, 0.2);
-    shape.lineTo(-0.15, 0.01);
-    shape.closePath();
-    const geo = new THREE.ShapeGeometry(shape);
-    geo.rotateX(-Math.PI / 2);
-    return geo;
-  }, []);
-  useEffect(() => () => geometry.dispose(), [geometry]);
-  useFrame(({ clock }) => {
-    if (!ref.current) return;
-    const matrix = new THREE.Matrix4();
-    const quaternion = new THREE.Quaternion();
-    const phase = reducedMotion ? 0 : ((clock.elapsedTime * 0.28) % 0.24) - 0.12;
-    items.forEach((item, index) => {
-      const angle = item.rotation ?? 0;
-      quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-      matrix.compose(
-        new THREE.Vector3(item.x - Math.sin(angle) * phase, 0.18, item.z - Math.cos(angle) * phase),
-        quaternion,
-        new THREE.Vector3(1, 1, 1),
-      );
-      ref.current!.setMatrixAt(index, matrix);
-    });
-    ref.current.instanceMatrix.needsUpdate = true;
-  });
-  if (!items.length) return null;
-  return (
-    <instancedMesh ref={ref} args={[geometry, undefined, items.length]}>
-      <meshBasicMaterial color="#fff8df" side={THREE.DoubleSide} />
-    </instancedMesh>
-  );
-}
-
 function CheckpointFlags({ items }: { items: Array<Instance & { number: number }> }) {
   return (
     <>
@@ -412,8 +411,16 @@ function CheckpointFlags({ items }: { items: Array<Instance & { number: number }
             <sphereGeometry args={[0.057, 10, 8]} />
             <meshStandardMaterial color="#e0b966" />
           </mesh>
+          <mesh position={[0.42, 0.88, 0.24]} castShadow>
+            <boxGeometry args={[0.3, 0.22, 0.024]} />
+            <meshStandardMaterial color="#f9cb69" roughness={0.8} />
+          </mesh>
+          <mesh position={[0, 0.215, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <ringGeometry args={[0.22, 0.27, 32]} />
+            <meshStandardMaterial color="#fff0b4" metalness={0.4} roughness={0.3} />
+          </mesh>
           <Html position={[0.28, 1.28, 0.24]} center zIndexRange={[7, 0]}>
-            <div className="checkpoint-label">{item.number}</div>
+            <div className="checkpoint-label" data-help-title={`Checkpoint ${item.number}`} data-help="Visit numbered checkpoints in order. Stay on this square through the laser stage to collect it and save your archive.">{item.number}</div>
           </Html>
         </group>
       ))}
@@ -428,6 +435,7 @@ function RobotFleet({
   reducedMotion,
   ownSeatId,
   ambientMotion,
+  onInspect,
 }: {
   robots: PublicRobotView[];
   activeEvent?: MatchEvent;
@@ -435,55 +443,8 @@ function RobotFleet({
   reducedMotion: boolean;
   ownSeatId?: string;
   ambientMotion: boolean;
+  onInspect?: (info?: Inspection) => void;
 }) {
-  const actors = useRef(new Map<string, Actor>());
-  const startedAt = useRef(0);
-  const { invalidate } = useThree();
-  useEffect(() => {
-    startedAt.current = performance.now();
-    invalidate();
-  }, [activeEvent?.revision, invalidate]);
-  useFrame((_, delta) => {
-    let moving = false;
-    const progress =
-      reducedMotion || !activeEvent
-        ? 1
-        : Math.min(1, (performance.now() - startedAt.current) / Math.max(1, stepDurationMs));
-    for (const robot of robots) {
-      const actor = actors.current.get(robot.seatId);
-      if (!actor) continue;
-      const target = new THREE.Vector3(
-        robot.position.x,
-        robot.poweredDown ? 0.08 : 0.22,
-        robot.position.y,
-      );
-      const factor = reducedMotion ? 1 : 1 - Math.exp(-delta * 15);
-      actor.group.position.lerp(target, factor);
-      const targetAngle = shortestAngle(actor.group.rotation.y, directionAngle(robot.direction));
-      actor.group.rotation.y = THREE.MathUtils.lerp(actor.group.rotation.y, targetAngle, factor);
-      const targetScale = robot.destroyed || robot.eliminated ? 0.01 : 0.86;
-      actor.group.scale.lerp(
-        new THREE.Vector3(
-          targetScale,
-          robot.poweredDown ? targetScale * 0.72 : targetScale,
-          targetScale,
-        ),
-        factor,
-      );
-      if (
-        activeEvent?.seatId === robot.seatId &&
-        ["move", "push", "conveyor", "express-conveyor", "pusher"].includes(activeEvent.type)
-      ) {
-        actor.group.position.y += Math.sin(Math.PI * progress) * 0.16;
-      }
-      if (!reducedMotion) actor.mixer.update(Math.min(delta, 0.05));
-      moving ||=
-        actor.group.position.distanceTo(target) > 0.004 ||
-        Math.abs(actor.group.rotation.y - targetAngle) > 0.004 ||
-        progress < 1;
-    }
-    if (!document.hidden && (moving || (!reducedMotion && ambientMotion))) invalidate();
-  });
   return (
     <>
       {robots.map((robot) => (
@@ -491,11 +452,11 @@ function RobotFleet({
           key={robot.seatId}
           robot={robot}
           event={activeEvent?.seatId === robot.seatId ? activeEvent : undefined}
-          actors={actors}
-          invalidate={invalidate}
+          stepDurationMs={stepDurationMs}
           isYou={robot.seatId === ownSeatId}
           reducedMotion={reducedMotion}
           ambientMotion={ambientMotion}
+          onInspect={onInspect}
         />
       ))}
     </>
@@ -505,19 +466,19 @@ function RobotFleet({
 function RobotActor({
   robot,
   event,
-  actors,
-  invalidate,
+  stepDurationMs,
   isYou,
   reducedMotion,
   ambientMotion,
+  onInspect,
 }: {
   robot: PublicRobotView;
   event?: MatchEvent;
-  actors: React.RefObject<Map<string, Actor>>;
-  invalidate: () => void;
+  stepDurationMs: number;
   isYou: boolean;
   reducedMotion: boolean;
   ambientMotion: boolean;
+  onInspect?: (info?: Inspection) => void;
 }) {
   const identity = ROBOT_BY_ID.get(robot.robotId)!;
   const gltf = useGLTF(identity.modelUrl);
@@ -532,94 +493,142 @@ function RobotActor({
     return object;
   }, [gltf.scene]);
   const group = useRef<THREE.Group>(null);
-  const mixer = useMemo(() => new THREE.AnimationMixer(clone), [clone]);
-  useEffect(
-    () => () => {
-      mixer.stopAllAction();
-      mixer.uncacheRoot(clone);
-    },
-    [mixer, clone],
-  );
-  useEffect(() => {
+  const suspension = useRef<THREE.Group>(null);
+  const { invalidate } = useThree();
+  const initialized = useRef(false);
+  const transition = useRef({
+    start: 0,
+    from: new THREE.Vector3(),
+    to: new THREE.Vector3(),
+    angle: 0,
+    targetAngle: 0,
+    scale: 1,
+    targetScale: 1,
+  });
+  useLayoutEffect(() => {
     if (!group.current) return;
-    group.current.position.set(robot.position.x, 0.22, robot.position.y);
-    group.current.rotation.y = directionAngle(robot.direction);
-    group.current.scale.setScalar(0.86);
-    actors.current.set(robot.seatId, { group: group.current, mixer });
-    invalidate();
-    return () => {
-      actors.current.delete(robot.seatId);
+    const target = new THREE.Vector3(robot.position.x, 0.15, robot.position.y);
+    const size = robot.destroyed || robot.eliminated ? 0 : 0.94;
+    if (!initialized.current || !event || reducedMotion) {
+      group.current.position.copy(target);
+      group.current.rotation.y = directionAngle(robot.direction);
+      group.current.scale.setScalar(size);
+      initialized.current = true;
+    }
+    // Respawns materialize at the archive instead of flying across the board.
+    if (event?.type === "respawn") {
+      group.current.position.copy(target);
+      group.current.scale.setScalar(0);
+    }
+    transition.current = {
+      start: performance.now(),
+      from: group.current.position.clone(),
+      to: target,
+      angle: group.current.rotation.y,
+      targetAngle: shortestAngle(group.current.rotation.y, directionAngle(robot.direction)),
+      scale: group.current.scale.x,
+      targetScale: size,
     };
-  }, [actors, invalidate, mixer, robot.seatId]);
-  useEffect(() => {
-    if (reducedMotion) {
-      mixer.stopAllAction();
-      return;
-    }
-    const clipName =
-      event?.type === "damage"
-        ? "hit"
-        : event?.type === "destroyed" || event?.type === "eliminated"
-          ? "power-down"
-          : event?.type === "respawn"
-            ? "respawn"
-            : event?.type === "victory"
-              ? "victory"
-              : event?.type === "turn" || event?.type === "gear"
-                ? "turn"
-                : event?.type === "push"
-                  ? "bump"
-                  : event?.type.includes("move") ||
-                      event?.type.includes("conveyor") ||
-                      event?.type === "pusher"
-                    ? "move"
-                    : "idle";
-    if (clipName === "idle" && (!ambientMotion || robot.poweredDown)) {
-      mixer.stopAllAction();
-      return;
-    }
-    const clip = THREE.AnimationClip.findByName(gltf.animations, clipName);
-    if (!clip) return;
-    mixer.stopAllAction();
-    const action = mixer.clipAction(clip);
-    action
-      .reset()
-      .setLoop(
-        clipName === "idle" ? THREE.LoopRepeat : THREE.LoopOnce,
-        clipName === "idle" ? Infinity : 1,
-      );
-    action.timeScale = clipName === "idle" ? 0.55 : 1;
-    action.clampWhenFinished = true;
-    action.play();
-  }, [event?.revision, gltf.animations, mixer, reducedMotion, ambientMotion, robot.poweredDown]);
-  if (robot.eliminated) return null;
+    if (process.env.NODE_ENV !== "production")
+      group.current.userData.motion = {
+        revision: event?.revision,
+        from: transition.current.from.toArray(),
+        to: target.toArray(),
+        start: transition.current.start,
+      };
+    invalidate();
+  }, [
+    event?.revision,
+    robot.position.x,
+    robot.position.y,
+    robot.direction,
+    robot.destroyed,
+    robot.eliminated,
+    reducedMotion,
+    invalidate,
+  ]);
+  useFrame(({ clock }) => {
+    if (!group.current || !suspension.current) return;
+    const t = transition.current;
+    const progress =
+      reducedMotion || !event ? 1 : motionProgress(performance.now() - t.start, stepDurationMs);
+    group.current.position.lerpVectors(t.from, t.to, progress);
+    group.current.rotation.y = THREE.MathUtils.lerp(t.angle, t.targetAngle, progress);
+    const size = THREE.MathUtils.lerp(t.scale, t.targetScale, progress);
+    group.current.scale.set(size, size * (robot.poweredDown ? 0.76 : 1), size);
+    const travelling =
+      event && ["move", "push", "conveyor", "express-conveyor", "pusher"].includes(event.type);
+    // Secondary motion is absolute and isolated from the authoritative position.
+    suspension.current.position.y = reducedMotion
+      ? 0
+      : travelling
+        ? Math.sin(progress * Math.PI) * 0.045
+        : event?.type === "victory"
+          ? Math.sin(progress * Math.PI) * 0.22
+          : ambientMotion && !robot.poweredDown
+            ? Math.sin(clock.elapsedTime * 1.3 + robot.seatId.length) * 0.012
+            : 0;
+    suspension.current.rotation.z =
+      !reducedMotion && event?.type === "damage"
+        ? Math.sin(progress * Math.PI * 4) * 0.05 * (1 - progress)
+        : 0;
+    if (
+      !document.hidden &&
+      (progress < 1 || (ambientMotion && !reducedMotion && !robot.poweredDown))
+    )
+      invalidate();
+  });
   return (
-    <group ref={group}>
-      <group rotation={[0, Math.PI, 0]}>
-        <primitive object={clone} />
+    <group
+      ref={group}
+      name={`robot:${robot.seatId}`}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        onInspect?.(robotInspection(robot));
+      }}
+      onPointerMove={(e) => {
+        e.stopPropagation();
+        onInspect?.(robotInspection(robot));
+      }}
+      onPointerOut={() => onInspect?.(undefined)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onInspect?.(robotInspection(robot));
+      }}
+    >
+      <mesh position={[0, 0.6, 0]}>
+        <boxGeometry args={[0.84, 1.2, 0.84]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} />
+      </mesh>
+      <group ref={suspension}>
+        <group rotation={[0, Math.PI, 0]}>
+          <primitive object={clone} />
+        </group>
       </group>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.1, -0.53]}>
-        <coneGeometry args={[0.1, 0.2, 3]} />
-        <meshBasicMaterial color={identity.color} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.035, 0]}>
+        <ringGeometry args={[0.46, 0.505, 48]} />
+        <meshBasicMaterial color={identity.color} transparent opacity={0.85} />
       </mesh>
-      {isYou && (
-        <>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.12, 0]}>
-            <ringGeometry args={[0.48, 0.54, 32]} />
-            <meshBasicMaterial color="#71955e" transparent opacity={0.8} />
-          </mesh>
-          <Html position={[0, 1.7, 0]} center zIndexRange={[6, 0]}>
-            <span className="robot-label">YOU</span>
-          </Html>
-        </>
-      )}
-      <mesh position={[0, 1.35, 0]}>
-        <sphereGeometry args={[0.06, 10, 8]} />
-        <meshBasicMaterial
-          color={robot.connected ? identity.color : "#827688"}
-          toneMapped={false}
-        />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, -0.56]}>
+        <circleGeometry args={[0.12, 3, Math.PI / 2]} />
+        <meshBasicMaterial color={isYou ? "#f9cf65" : identity.color} side={THREE.DoubleSide} />
       </mesh>
+      <Html
+        position={[0, isYou ? 1.65 : 1.5, 0]}
+        center
+        zIndexRange={[6, 0]}
+        style={{ pointerEvents: "none" }}
+      >
+        <span
+          className={`robot-label ${isYou ? "own" : ""}`}
+          data-help-title={robot.displayName}
+          data-help={robotInspection(robot).detail}
+          style={{ "--robot": identity.color, pointerEvents: "auto" } as React.CSSProperties}
+        >
+          {isYou ? "YOU" : identity.name.replace(" Bot", "")}
+          <small>{robot.direction.slice(0, 1).toUpperCase()}</small>
+        </span>
+      </Html>
     </group>
   );
 }
@@ -651,8 +660,6 @@ function LaserEffect({ event }: { event?: MatchEvent }) {
 
 function CameraRig({
   course,
-  activeEvent,
-  reducedMotion,
   reset,
 }: {
   course: CourseDefinition;
@@ -662,7 +669,6 @@ function CameraRig({
 }) {
   const { camera, size, invalidate } = useThree();
   const controls = useRef<React.ElementRef<typeof OrbitControls>>(null);
-  const manual = useRef(false);
   const bounds = courseBounds(course);
   const center = useMemo(
     () => new THREE.Vector3(0, 0, course.docks.some((dock) => dock.y >= bounds.height) ? 1.1 : 0.7),
@@ -670,41 +676,26 @@ function CameraRig({
   );
   const overview = useMemo(() => {
     const aspect = Math.max(0.8, size.width / Math.max(1, size.height));
-    const span = Math.max(bounds.height + 8, (bounds.width + 7) / aspect);
-    return new THREE.Vector3(span * 0.44, span * 0.88, span * 0.82);
+    const span = Math.max(bounds.height + 7, (bounds.width + 6) / aspect);
+    return new THREE.Vector3(span * 0.28, span * 1.02, span * 0.8);
   }, [bounds.height, bounds.width, size.height, size.width]);
   useEffect(() => {
-    manual.current = false;
     camera.position.copy(overview);
     controls.current?.target.copy(center);
     controls.current?.update();
     invalidate();
   }, [camera, center, course.id, invalidate, overview, reset]);
-  useEffect(() => {
-    if (reducedMotion || manual.current || !activeEvent?.to || !controls.current) return;
-    const local = new THREE.Vector3(
-      activeEvent.to.x - bounds.width / 2 + 0.5,
-      0,
-      activeEvent.to.y - bounds.height / 2 + 0.5,
-    );
-    controls.current.target.lerp(local, 0.28);
-    controls.current.update();
-    invalidate();
-  }, [activeEvent?.revision, bounds.height, bounds.width, invalidate, reducedMotion]);
   return (
     <OrbitControls
       ref={controls}
       makeDefault
-      enablePan={false}
+      enablePan
       enableDamping
       dampingFactor={0.08}
       minPolarAngle={0.55}
       maxPolarAngle={1.18}
-      minDistance={8}
-      maxDistance={42}
-      onStart={() => {
-        manual.current = true;
-      }}
+      minDistance={5}
+      maxDistance={68}
       onChange={() => invalidate()}
     />
   );

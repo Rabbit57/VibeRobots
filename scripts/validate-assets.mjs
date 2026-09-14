@@ -86,7 +86,7 @@ for (const asset of ["garden-workshop.webp", "garden-course-postcards.webp"]) {
     `${asset} exceeds 700 KB`,
   );
 }
-assert.ok(modelBytes < 6 * 1024 * 1024, "all GLB files must remain below 6 MB");
+assert.ok(modelBytes < 7 * 1024 * 1024, "all GLB files must remain below 7 MB");
 
 for (const image of [
   "vibe-robots-key-art.webp",

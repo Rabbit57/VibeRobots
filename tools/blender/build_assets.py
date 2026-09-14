@@ -87,7 +87,7 @@ def finish(obj, name: str, mat, bevel=0.055):
     if bevel:
         mod = obj.modifiers.new("Soft bevel", "BEVEL")
         mod.width = bevel
-        mod.segments = 3
+        mod.segments = 4
         bpy.context.view_layer.objects.active = obj
         bpy.ops.object.modifier_apply(modifier=mod.name)
     obj.data.materials.append(mat)
@@ -109,7 +109,7 @@ def cylinder(name, location, radius, depth, mat, rotation=(0, 0, 0), vertices=16
 
 
 def sphere(name, location, radius, mat):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=radius, location=location)
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=32, ring_count=16, radius=radius, location=location)
     return finish(bpy.context.object, name, mat, 0)
 
 
@@ -146,7 +146,9 @@ def add_face(parts, body_mat, expression="happy"):
     screen = material("Screen", PALETTE["plum"], metallic=0, roughness=0.4)
     glow = material("Face glow", PALETTE["cream"], metallic=0, roughness=0.5, emission=PALETTE["cream"], strength=0.45)
     blush = material("Apricot blush", (1, .38, .28, 1), metallic=0, roughness=.7)
-    parts.append(cube("face_screen", (0, -0.335, 0.69), (0.56, 0.16, 0.36), screen, 0.14))
+    bezel = material("Brushed bezel", (.32, .40, .38, 1), metallic=.75, roughness=.28)
+    parts.append(cube("face_bezel", (0, -.325, .69), (.62, .16, .40), bezel, .12))
+    parts.append(cube("face_screen", (0, -0.345, 0.69), (0.55, 0.16, 0.33), screen, 0.12))
     for x in [-.135, .135]:
         points = [(x + math.cos(i * math.pi / 8) * .052, -.424, .70 + math.sin(i * math.pi / 8) * .062) for i in range(9)]
         parts.append(stroke("eye_l" if x < 0 else "eye_r", points, .018, glow))
@@ -170,8 +172,8 @@ def make_robot(robot_id: str, color_name: str, silhouette: str):
     root["robot_id"] = robot_id
     root["animation_contract"] = "idle,move,turn,bump,hit,power-down,respawn,victory"
 
-    body = material(f"{color_name.title()} paint", PALETTE[color_name], metallic=0.12, roughness=0.44)
-    accent = material("Warm steel", PALETTE["steel"], metallic=0.2, roughness=0.55)
+    body = material(f"{color_name.title()} paint", PALETTE[color_name], metallic=0.38, roughness=0.28)
+    accent = material("Warm steel", PALETTE["steel"], metallic=0.55, roughness=0.34)
     cream = material("Warm cream", PALETTE["cream"], metallic=0.05, roughness=0.5)
     parts = []
 
@@ -227,6 +229,42 @@ def make_robot(robot_id: str, color_name: str, silhouette: str):
         for x in (-0.31, 0.31):
             parts.append(cube(f"wing_post_{x}", (x, 0.39, 0.42), (0.06, 0.08, 0.26), accent, 0.015))
 
+    # Machined details read at close zoom and in the large driver portraits.
+    rubber = material("Graphite rubber", (.022, .031, .033, 1), metallic=0, roughness=.82)
+    alloy = material("Machined alloy", (.49, .59, .58, 1), metallic=.8, roughness=.26)
+    lamp = material("Signal glass", (1, .58, .16, 1), metallic=.18, roughness=.19, emission=(1, .26, .03, 1), strength=.7)
+    parts.append(cube("underslung_chassis", (0, .04, .30), (body_size[0]*.88, body_size[1]*.87, .16), accent, .035))
+    parts.append(cube("rear_service_panel", (0, body_size[1]*.53, .58), (.32, .035, .26), accent, .028))
+    for z in [.51, .56, .61, .66]:
+        parts.append(cube("cooling_vent", (0, body_size[1]*.56, z), (.23, .024, .017), rubber, .006))
+    for side in [-1, 1]:
+        parts.append(cube("shoulder_stripe", (side*body_size[0]*.28, -.04, .929), (.05, .23, .018), cream, .009))
+        parts.append(sphere("front_running_light", (side*.235, -.355, .42), .029, lamp))
+        for z in [.48, .79]:
+            parts.append(cylinder("panel_fastener", (side*body_size[0]*.52, -.08, z), .018, .014, alloy, rotation=(0, math.pi/2, 0), vertices=8))
+    if silhouette in {"tank", "racer", "crusher", "hauler", "antenna"}:
+        radius = .19 if silhouette == "tank" else .14
+        for side in [-1, 1]:
+            x = (body_size[0]/2+.085)*side
+            for y in [-.25, .25]:
+                parts.append(cylinder("alloy_hub", (x, y, .22), radius*.6, .024, alloy, rotation=(0, math.pi/2, 0), vertices=20))
+                parts.append(cylinder("hub_axle", (x+side*.015, y, .22), radius*.22, .03, body, rotation=(0, math.pi/2, 0), vertices=12))
+                for i in range(14):
+                    angle = i*math.tau/14
+                    tread = cube("tire_tread", (x-side*.06, y+math.sin(angle)*radius, .22+math.cos(angle)*radius), (.12,.028,.022), rubber, .006)
+                    tread.rotation_euler.x = -angle
+                    parts.append(tread)
+    if silhouette == "hammer":
+        for side in [-1, 1]:
+            parts.append(cylinder("ankle_pivot", (side*.23, -.09, .25), .07, .06, alloy, rotation=(math.pi/2,0,0)))
+            parts.append(cube("boot_sole", (side*.22, .01, .045), (.24,.35,.045), rubber,.012))
+        parts.append(cube("hammer_strike_face", (.45,-.52,.92), (.30,.035,.22), alloy,.03))
+        for y in [-.18,-.1,0,.08]:
+            parts.append(torus("handle_grip", (.45,y,.82), .049,.009,rubber,rotation=(math.pi/2,0,0)))
+    if silhouette == "spinner":
+        for i in range(8):
+            a=i*math.tau/8
+            parts.append(sphere("ring_rivet", (math.sin(a)*.28,math.cos(a)*.28,.962),.018,alloy))
     parent_all(root, parts)
     # All motion is on RobotRoot; merge its static parts by material to keep
     # eight-character races inexpensive without changing the animation contract.
@@ -290,7 +328,7 @@ def setup_render():
     scene.world.color = (0.3, 0.3, 0.3)
     scene.render.image_settings.color_mode = "RGBA"
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 24
+    scene.cycles.samples = 48
     scene.cycles.use_denoising = True
     bpy.ops.object.light_add(type="AREA", location=(3, -4, 6))
     key = bpy.context.object

@@ -46,7 +46,10 @@ for animation contracts, ImageGen prompts, and performance budgets.
 - `game/content/` — typed Programs, Options, robots, boards, and courses
 - `worker/index.ts` — Vinext Worker + SQLite `MatchRoom` Durable Object
 - `components/game.tsx` — server connection and the authority/presentation boundary
-- `components/factory-scene.tsx` — demand-rendered R3F diorama and GLB animation
+- `components/factory-scene.tsx` — demand-rendered R3F diorama and synchronized robot motion
+- `components/board-surfaces.tsx` — batched board markings and laser hardware
+- `components/game-details.tsx` — tactical map, tooltips, card artwork and turn timeline
+- `game/inspection.ts` — shared tile, robot and program explanations
 - `game/presentation.ts` — deterministic event-to-keyframe presentation compiler
 - `docs/rules-audit.md` — rule and Option source matrix
 
