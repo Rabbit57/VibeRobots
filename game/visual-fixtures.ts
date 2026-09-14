@@ -1,6 +1,6 @@
 import type { MatchEvent, PrivateMatchView, ProgramCard, PublicRobotView } from './types';
 
-export type VisualMode = 'home' | 'lobby' | 'programming' | 'laser' | 'destruction' | 'respawn' | 'victory';
+export type VisualMode = 'home' | 'lobby' | 'programming' | 'laser' | 'destruction' | 'respawn' | 'victory' | 'solo-victory' | 'solo-defeat';
 
 export interface VisualFixture {
   mode: VisualMode;
@@ -23,7 +23,7 @@ const cards: ProgramCard[] = [
 
 function robot(seatId: string, robotId: string, displayName: string, x: number, y: number): PublicRobotView {
   return {
-    seatId, robotId, displayName, position: { x, y }, direction: seatId === 'ada' ? 'east' : 'west', archive: { x, y },
+    seatId, robotId, displayName, controller: 'human', position: { x, y }, direction: seatId === 'ada' ? 'east' : 'west', archive: { x, y },
     damage: seatId === 'ada' ? 2 : 5, lives: 3, checkpoint: seatId === 'ada' ? 2 : 1,
     registers: Array.from({ length: 5 }, () => ({ card: null, locked: false })),
     optionCount: seatId === 'ada' ? 1 : 0, revealedOptions: seatId === 'ada' ? ['gyroscopic-stabilizer'] : [],
@@ -34,7 +34,7 @@ function robot(seatId: string, robotId: string, displayName: string, x: number, 
 function view(phase: PrivateMatchView['public']['phase'], robots: PublicRobotView[], events: MatchEvent[] = []): PrivateMatchView {
   return {
     public: {
-      roomCode: 'COZYBOTS42', revision: 42, eventRevision: 87, phase, courseId: 'risky-exchange', fourLifeRule: false,
+      roomCode: 'COZYBOTS42', mode: 'multiplayer', revision: 42, eventRevision: 87, phase, courseId: 'risky-exchange', fourLifeRule: false,
       hostSeatId: 'ada', dockingOrder: ['ada', 'grace'], robots, registerIndex: phase === 'lobby' ? 0 : 3,
       programDeckCount: 66, optionDeckCount: 22, createdAt: 1_700_000_000_000, updatedAt: 1_700_000_010_000,
       winnerSeatId: phase === 'complete' ? 'ada' : undefined,
@@ -49,10 +49,31 @@ function event(type: string, message: string, extra: Partial<MatchEvent>): Match
 
 export function makeVisualFixture(candidate: string): VisualFixture | undefined {
   const mode = candidate as VisualMode;
-  if (!['home', 'lobby', 'programming', 'laser', 'destruction', 'respawn', 'victory'].includes(mode)) return;
+  if (!['home', 'lobby', 'programming', 'laser', 'destruction', 'respawn', 'victory', 'solo-victory', 'solo-defeat'].includes(mode)) return;
   if (mode === 'home') return { mode, screen: 'home' };
   const ada = robot('ada', 'hammer-bot', 'Ada', 3, 8);
   const grace = robot('grace', 'twitch', 'Grace', 8, 6);
+  if (mode === 'solo-victory' || mode === 'solo-defeat') {
+    const spin = robot('cpu-2', 'spin-bot', 'Spin Bot CPU', 6, 5);
+    const zoom = robot('cpu-3', 'zoom-bot', 'Zoom Bot CPU', 9, 9);
+    for (const bot of [grace, spin, zoom]) bot.controller = 'bot';
+    grace.displayName = 'Twitch CPU';
+    const result = view('complete', [ada, grace, spin, zoom]);
+    result.public.mode = 'solo';
+    if (mode === 'solo-victory') {
+      ada.checkpoint = 3;
+      result.public.winnerSeatId = 'ada';
+      result.public.completionReason = 'checkpoint';
+    } else {
+      ada.lives = 0;
+      ada.damage = 10;
+      ada.destroyed = true;
+      ada.eliminated = true;
+      result.public.winnerSeatId = undefined;
+      result.public.completionReason = 'human-eliminated';
+    }
+    return { mode, screen: 'match', view: result };
+  }
   if (mode === 'lobby') return { mode, screen: 'lobby', view: view('lobby', [ada, grace]) };
   if (mode === 'programming') return { mode, screen: 'match', view: view('programming', [ada, grace]) };
   if (mode === 'laser') {

@@ -3,9 +3,9 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { COURSES } from '@/game/content/boards';
 import { ROBOTS } from '@/game/content/robots';
-import { appendPresentationBatch, applyPresentationEvent, reconcilePresentation, resetPresentation, type PresentationStep } from '@/game/presentation';
-import type { MatchEvent, PrivateMatchView, ProgramCard, PublicRobotView } from '@/game/types';
-import { CourseChip, HomePanel, JoinPanel, LegalPanel, LobbyPanel, MatchHud, type PlaybackView } from './game-ui';
+import { appendPresentationBatch, applyPresentationEvent, isVisualEvent, reconcilePresentation, resetPresentation, type PresentationStep } from '@/game/presentation';
+import type { MatchEvent, MatchMode, PrivateMatchView, ProgramCard, PublicRobotView } from '@/game/types';
+import { CourseChip, HomePanel, JoinPanel, LegalPanel, LobbyPanel, MatchHud, SoloResultPanel, type PlaybackView } from './game-ui';
 import type { GraphicsQuality } from './factory-scene';
 import type { VisualFixture } from '@/game/visual-fixtures';
 
@@ -34,6 +34,7 @@ export function VibeRobotsGame({ title }: { title: string }) {
   const [cameraReset, setCameraReset] = useState(0);
   const [visualFixture, setVisualFixture] = useState<VisualFixture>();
   const [connectionEpoch, setConnectionEpoch] = useState(0);
+  const [readyCourseId, setReadyCourseId] = useState('');
   const socket = useRef<WebSocket | undefined>(undefined);
   const audio = useRef<AudioContext | undefined>(undefined);
   const reconnectTimer = useRef<number | undefined>(undefined);
@@ -43,6 +44,7 @@ export function VibeRobotsGame({ title }: { title: string }) {
   const ownRobot = publicState?.robots.find((robot) => robot.seatId === view?.seatId);
   const isHost = publicState?.hostSeatId === view?.seatId;
   const selectedCourse = COURSES.find((course) => course.id === (publicState?.courseId ?? courseId)) ?? COURSES[0];
+  const markSceneReady = useCallback(() => setReadyCourseId(selectedCourse.id), [selectedCourse.id]);
   const scheduledPlayback = usePresentationPlayback(view, fast, reducedMotion, connectionEpoch);
   const playback: PlaybackView = visualFixture ? {
     robots: visualFixture.view?.public.robots ?? [],
@@ -80,6 +82,7 @@ export function VibeRobotsGame({ title }: { title: string }) {
   }, [playback.active?.event.revision, playSfx]);
 
   const connect = useCallback((code: string, seatId: string, seatToken: string) => {
+    shuttingDown.current = false;
     window.clearTimeout(reconnectTimer.current);
     socket.current?.close();
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -134,17 +137,23 @@ export function VibeRobotsGame({ title }: { title: string }) {
     void fetch(`/api/rooms/${code}`).then(async (response) => {
       if (!response.ok) throw new Error('Room not found or expired.');
       const metadata = await response.json() as PrivateMatchView['public'];
+      if (metadata.mode === 'solo') {
+        history.replaceState(null, '', location.pathname);
+        setRoomCode('');
+        setScreen('home');
+        throw new Error('That solo workshop can only be reopened in the browser that created it.');
+      }
       const used = new Set(metadata.robots.map((robot) => robot.robotId));
       setRobotId(ROBOTS.find((robot) => !used.has(robot.id))?.id ?? ROBOTS[0].id);
     }).catch((caught) => setError(caught instanceof Error ? caught.message : 'Room unavailable.'));
   }, [connect]);
 
-  async function createRoom() {
+  async function createRoom(mode: MatchMode) {
     setBusy(true);
     setError('');
     playSfx();
     try {
-      const response = await fetch('/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: name.trim() || 'Host', robotId }) });
+      const response = await fetch('/api/rooms', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ displayName: name.trim() || 'Host', robotId, mode }) });
       const data = await response.json() as RoomReply & { error?: string };
       if (!response.ok) throw new Error(data.error ?? 'Room creation failed.');
       saveSeat(data.code, data.seatId, data.seatToken);
@@ -190,6 +199,20 @@ export function VibeRobotsGame({ title }: { title: string }) {
     if (!socket.current || !view) return;
     socket.current.send(JSON.stringify({ type: 'command', command: { type, id: crypto.randomUUID(), revision: view.public.revision, ...extra } }));
   }, [view]);
+
+  const returnHome = useCallback(() => {
+    shuttingDown.current = true;
+    window.clearTimeout(reconnectTimer.current);
+    socket.current?.close(1000, 'Returning to workshop');
+    socket.current = undefined;
+    if (roomCode) sessionStorage.removeItem(`vibe-robots:${roomCode}`);
+    history.replaceState(null, '', location.pathname);
+    setView(undefined);
+    setSelected([]);
+    setRoomCode('');
+    setError('');
+    setScreen('home');
+  }, [roomCode]);
 
   function toggleCard(card: ProgramCard) {
     if (ownRobot?.finishedProgramming || playback.playing) return;
@@ -243,7 +266,7 @@ export function VibeRobotsGame({ title }: { title: string }) {
   return <div className={`game-root ${fast ? 'speed-fast' : ''} ${reducedMotion ? 'reduce-motion' : ''}`} data-ready={hydrated} data-visual={visualFixture?.mode}>
     <div className="phone-gate"><span className="phone-robot">◉‿◉</span><h1>Factory floor too small</h1><p>The diorama likes a wider table. Turn a tablet sideways or open Vibe Robots on a desktop to play.</p></div>
     <header className="topbar">
-      <button className="brand" type="button" onClick={() => setScreen('home')} aria-label="Vibe Robots home"><span className="brand-mark">VR</span><span>{title}</span></button>
+      <button className="brand" type="button" onClick={screen === 'home' ? undefined : returnHome} aria-label="Vibe Robots home"><span className="brand-mark">VR</span><span>{title}</span></button>
       <div className="status-strip"><i className={publicState?.phase === 'paused' ? 'amber' : ''}/><span>{playback.playing ? playbackLabel(playback.active?.event) : publicState ? phaseLabel(publicState.phase) : 'Workshop ready'}</span></div>
       <nav className="top-actions" aria-label="Presentation settings">
         <button type="button" aria-pressed={fast} onClick={() => setFast(!fast)}>{fast ? 'FAST' : '1×'}</button>
@@ -253,19 +276,20 @@ export function VibeRobotsGame({ title }: { title: string }) {
         <button type="button" onClick={() => setLegalOpen(true)}>ABOUT</button>
       </nav>
     </header>
-    <section className={`factory-viewport ${showScene ? 'scene-live' : 'hero-live'}`} aria-label={showScene ? `3D view of ${selectedCourse.name}` : 'Cozy robot workshop'}>
+    <section className={`factory-viewport ${showScene ? 'scene-live' : 'hero-live'} ${showScene && readyCourseId === selectedCourse.id ? 'scene-ready' : ''} ${screen === 'match' ? 'match-live' : ''}`} aria-label={showScene ? `3D view of ${selectedCourse.name}` : 'Cozy robot workshop'}>
       <picture className="key-art">
         <source srcSet="/assets/images/vibe-robots-key-art.avif" type="image/avif"/>
         <img src="/assets/images/vibe-robots-key-art.webp" alt="Eight friendly racing robots on a miniature factory board"/>
       </picture>
-      {showScene && <Suspense fallback={<SceneLoader/>}><FactoryScene course={selectedCourse} robots={playback.robots} activeEvent={playback.active?.event} stepDurationMs={playback.active?.durationMs ?? 0} reducedMotion={reducedMotion} quality={quality} cameraReset={cameraReset}/></Suspense>}
+      {showScene && <Suspense fallback={<SceneLoader/>}><FactoryScene course={selectedCourse} robots={playback.robots} activeEvent={playback.active?.event} stepDurationMs={playback.active?.durationMs ?? 0} reducedMotion={reducedMotion} quality={quality} cameraReset={cameraReset} onReady={markSceneReady}/></Suspense>}
       <div className="warm-vignette"/>
       {publicState && <CourseChip courseId={selectedCourse.id}/>}
     </section>
-    {screen === 'home' && <HomePanel name={name} setName={setName} robotId={robotId} setRobotId={setRobotId} roomCode={roomCode} setRoomCode={setRoomCode} createRoom={createRoom} joinRoom={joinRoom} busy={busy || !hydrated} error={error}/>}
+    {screen === 'home' && <HomePanel name={name} setName={setName} robotId={robotId} setRobotId={setRobotId} roomCode={roomCode} setRoomCode={setRoomCode} createSolo={() => createRoom('solo')} createRoom={() => createRoom('multiplayer')} joinRoom={joinRoom} busy={busy || !hydrated} error={error}/>}
     {screen === 'lobby' && view && <LobbyPanel view={view} roomCode={roomCode} isHost={isHost} courseId={courseId} setCourseId={setCourseId} fourLives={fourLives} setFourLives={setFourLives} start={() => send('start', { courseId, fourLifeRule: fourLives })} error={error}/>}
     {screen === 'lobby' && !view && <JoinPanel roomCode={roomCode} name={name} setName={setName} robotId={robotId} setRobotId={setRobotId} join={joinRoom} busy={busy || !hydrated} error={error}/>}
-    {screen === 'match' && view && <MatchHud view={view} sceneRobots={playback.robots} selected={selected} toggle={toggleCard} moveSelected={moveSelected} submit={() => send('program', { cards: selected })} powerDown={() => send('announce-power-down', { enabled: !ownRobot?.powerDownNext })} activateOption={(optionId, payload) => send('option', { optionId, payload })} resolveDecision={(choice) => send('decision', { choice })} reducedMotion={reducedMotion} setReducedMotion={setReducedMotion} playback={playback}/>}
+    {screen === 'match' && view && <MatchHud view={view} sceneRobots={playback.robots} selected={selected} toggle={toggleCard} moveSelected={moveSelected} submit={() => send('program', { cards: selected })} powerDown={(enabled) => send(ownRobot?.poweredDown ? 'stay-powered-down' : 'announce-power-down', { enabled })} activateOption={(optionId, payload) => send('option', { optionId, payload })} resolveDecision={(choice) => send('decision', { choice })} reducedMotion={reducedMotion} setReducedMotion={setReducedMotion} playback={playback}/>}
+    {screen === 'match' && view?.public.mode === 'solo' && view.public.phase === 'complete' && !playback.playing && <SoloResultPanel view={view} returnHome={returnHome}/>}
     {legalOpen && <LegalPanel close={() => setLegalOpen(false)}/>}
   </div>;
 }
@@ -313,7 +337,8 @@ function usePresentationPlayback(view: PrivateMatchView | undefined, fast: boole
     if (!active && queue.length === 0 && initialized.current) setRobots((current) => reconcilePresentation(current, finalRobots.current));
   }, [active, queue.length, view?.public.revision]);
 
-  return { robots, active, remaining: queue.length, playing: Boolean(active || queue.length) };
+  const pendingVisuals = view?.events.some((event) => event.revision > lastQueued.current && isVisualEvent(event)) ?? false;
+  return { robots, active, remaining: queue.length, playing: Boolean(active || queue.length || pendingVisuals) };
 }
 
 function SceneLoader() {

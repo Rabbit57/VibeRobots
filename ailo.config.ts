@@ -8,7 +8,7 @@ export const ailoGame = {
   slug: 'vibe-robots',
   title: 'Vibe Robots',
   description:
-    'Out-program your rivals in a dangerous online factory race for 2–8 players.',
+    'Race three CPU rivals solo or out-program friends in a dangerous online factory.',
 } as const;
 
 export const ailoWorkerName = `ailo-${ailoGame.slug}`;

@@ -181,9 +181,9 @@ describe('authority, redaction, and deterministic replay', () => {
   });
 
   const expectedGolden: Record<string, string> = {
-    'risky-exchange': 'd4e41919e1eb7a35',
-    'dizzy-dash': 'c9075a1436a839bb',
-    'against-the-grain': '89d309a9858bed4b',
+    'risky-exchange': '600857c8871f52a8',
+    'dizzy-dash': 'bb3a8067fd3e2924',
+    'against-the-grain': 'e1855c628292a32b',
   };
   for (const course of COURSES) test(`golden deterministic replay: ${course.name}`, () => {
     const replay = () => {

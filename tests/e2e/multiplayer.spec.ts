@@ -9,7 +9,7 @@ test('two players create, join, start, program, and reconnect', async ({ browser
   await host.goto('/');
   await expect(host.locator('.game-root')).toHaveAttribute('data-ready', 'true');
   await host.getByPlaceholder('Your workshop nickname').fill('Ada');
-  await host.getByRole('button', { name: /create a cozy room/i }).click();
+  await host.getByRole('button', { name: /create online room/i }).click();
   await expect(host.locator('.lobby-panel .kicker')).toHaveText('PRIVATE WORKSHOP');
   const code = await host.locator('.lobby-panel h2').innerText();
   await guest.goto(`/?room=${code}`);
@@ -34,10 +34,10 @@ test('two players create, join, start, program, and reconnect', async ({ browser
   }
   await expect.poll(async () => {
     const states = await Promise.all([host, guest].map((page) => page.evaluate(() => {
-      const match = (window as typeof window & { __VIBE_MATCH__?: { public: { revision: number; phase: string } } }).__VIBE_MATCH__;
-      return match ? { revision: match.public.revision, phase: match.public.phase } : undefined;
+      const match = (window as typeof window & { __VIBE_MATCH__?: { public: { revision: number; phase: string; robots: Array<{ finishedProgramming: boolean }> } } }).__VIBE_MATCH__;
+      return match ? { revision: match.public.revision, phase: match.public.phase, resolved: match.public.robots.every((robot) => !robot.finishedProgramming) } : undefined;
     })));
-    return Boolean(states[0] && states[1] && states[0].revision > startRevision && states[0].revision === states[1].revision && states[0].phase === states[1].phase && ['programming', 'complete'].includes(states[0].phase));
+    return Boolean(states[0] && states[1] && states[0].revision >= startRevision + 2 && states[0].revision === states[1].revision && states[0].phase === states[1].phase && states[0].resolved && states[1].resolved && ['programming', 'complete'].includes(states[0].phase));
   }).toBe(true);
   const publicResult = async (page: typeof host) => page.evaluate(() => {
     const match = (window as typeof window & { __VIBE_MATCH__: { public: { revision: number; phase: string; robots: unknown[] }; events: Array<{ revision: number; type: string; public: boolean }> } }).__VIBE_MATCH__;
@@ -48,7 +48,8 @@ test('two players create, join, start, program, and reconnect', async ({ browser
       events: match.events.filter((event) => event.public).map(({ revision, type }) => ({ revision, type })),
     };
   });
-  expect(await publicResult(host)).toEqual(await publicResult(guest));
+  const [hostResult, guestResult] = await Promise.all([publicResult(host), publicResult(guest)]);
+  expect(hostResult).toEqual(guestResult);
   await host.reload();
   await expect(host.locator('.program-console, .lobby-panel')).toBeVisible({ timeout: 15_000 });
   await guest.close();
@@ -61,7 +62,7 @@ test('tablet supports touch-sized controls and reduced motion', async ({ page },
   test.skip(testInfo.project.name !== 'landscape-tablet', 'tablet-only check');
   await page.goto('/');
   await expect(page.getByText('Factory floor too small')).toBeHidden();
-  await expect(page.getByRole('button', { name: /create a cozy room/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /create online room/i })).toBeVisible();
   await page.getByRole('button', { name: /sound on/i }).tap();
   await expect(page.getByRole('button', { name: /sound off/i })).toBeVisible();
 });

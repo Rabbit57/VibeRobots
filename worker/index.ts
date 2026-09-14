@@ -1,7 +1,8 @@
 import vinext from 'vinext/server/fetch-handler';
 import { DurableObject } from 'cloudflare:workers';
+import { addSoloBots, programSoloBots } from '../game/bot';
 import { addSeat, applyCommand, createLobby, privateView, publicView, RuleError, shuffled } from '../game/engine';
-import type { MatchCommand, MatchEvent, MatchState } from '../game/types';
+import type { MatchCommand, MatchEvent, MatchMode, MatchState } from '../game/types';
 
 interface Env {
   MATCH_ROOMS: DurableObjectNamespace<MatchRoom>;
@@ -55,7 +56,10 @@ export class MatchRoom extends DurableObject<Env> {
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    ctx.blockConcurrencyWhile(async () => { this.room = await ctx.storage.get<StoredRoom>('room'); });
+    ctx.blockConcurrencyWhile(async () => {
+      this.room = await ctx.storage.get<StoredRoom>('room');
+      if (this.room && normalizeRoom(this.room)) await ctx.storage.put('room', this.room);
+    });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -79,17 +83,20 @@ export class MatchRoom extends DurableObject<Env> {
     const code = cleanCode(input.code);
     const displayName = cleanName(input.displayName);
     const robotId = cleanId(input.robotId);
+    const mode = cleanMode(input.mode);
     const seatId = crypto.randomUUID();
     const seatToken = randomToken();
-    const state = createLobby(code, { seatId, robotId, displayName });
+    const state = createLobby(code, { seatId, robotId, displayName }, Date.now(), undefined, mode);
+    if (mode === 'solo') addSoloBots(state);
     this.room = { state, seats: { [seatId]: { hash: await hashToken(seatToken), joinedAt: Date.now() } }, recentEvents: [] };
     await this.persist();
-    this.log('room-created', { code, players: 1 });
+    this.log('room-created', { code, mode, players: state.robots.length });
     return json({ code, seatId, seatToken, view: privateView(state, seatId) }, 201);
   }
 
   private async join(input: Record<string, unknown>) {
     const room = this.requireRoom();
+    if (room.state.mode === 'solo') throw new RuleError('illegal', 'Solo workshops cannot be joined.');
     const seatId = crypto.randomUUID();
     const seatToken = randomToken();
     addSeat(room.state, { seatId, robotId: cleanId(input.robotId), displayName: cleanName(input.displayName) });
@@ -123,7 +130,7 @@ export class MatchRoom extends DurableObject<Env> {
       secret.disconnectedAt = undefined;
       const robot = room.state.robots.find((candidate) => candidate.seatId === message.seatId)!;
       robot.connected = true;
-      const active = room.state.robots.filter((candidate) => !candidate.eliminated);
+      const active = room.state.robots.filter((candidate) => candidate.controller === 'human' && !candidate.eliminated);
       if (room.state.phase === 'paused' && active.every((candidate) => candidate.connected)) {
         room.state.phase = room.state.phaseBeforePause ?? 'programming';
         room.state.phaseBeforePause = undefined;
@@ -138,9 +145,14 @@ export class MatchRoom extends DurableObject<Env> {
     if (message.type !== 'command' || !message.command || !attachment.seatId) return this.sendError(socket, 'Unsupported message.');
     try {
       const result = applyCommand(room.state, attachment.seatId, message.command);
-      room.recentEvents = [...room.recentEvents, ...result.events].slice(-100);
+      const events = [...result.events];
+      if (room.state.mode === 'solo' && (message.command.type === 'program' || message.command.type === 'stay-powered-down')) {
+        events.push(...programSoloBots(room.state));
+      }
+      events.forEach((event, ordinal) => { event.ordinal = ordinal; });
+      room.recentEvents = [...room.recentEvents, ...events].slice(-100);
       await this.persist();
-      this.broadcast(result.events);
+      this.broadcast(events);
       if (room.state.timerDeadline || room.state.phase === 'complete') await this.scheduleAlarm();
     } catch (caught) {
       const category = caught instanceof RuleError ? caught.category : 'fatal-engine';
@@ -195,7 +207,7 @@ export class MatchRoom extends DurableObject<Env> {
     const host = room.state.robots.find((candidate) => candidate.seatId === room.state.hostSeatId);
     const hostSecret = host && room.seats[host.seatId];
     if (room.state.phase === 'lobby' && host && !host.connected && hostSecret?.disconnectedAt && now - hostSecret.disconnectedAt >= 60_000) {
-      const replacement = room.state.robots.filter((candidate) => candidate.connected).sort((a, b) => room.seats[a.seatId].joinedAt - room.seats[b.seatId].joinedAt)[0];
+      const replacement = room.state.robots.filter((candidate) => candidate.controller === 'human' && candidate.connected && room.seats[candidate.seatId]).sort((a, b) => room.seats[a.seatId].joinedAt - room.seats[b.seatId].joinedAt)[0];
       if (replacement) {
         room.state.hostSeatId = replacement.seatId;
         room.state.revision += 1;
@@ -300,6 +312,31 @@ function cleanId(value: unknown) {
   const id = String(value ?? '');
   if (!/^[a-z0-9-]{2,32}$/.test(id)) throw new Error('Invalid robot selection.');
   return id;
+}
+
+function cleanMode(value: unknown): MatchMode {
+  if (value === undefined) return 'multiplayer';
+  if (value === 'multiplayer' || value === 'solo') return value;
+  throw new Error('Invalid match mode.');
+}
+
+function normalizeRoom(room: StoredRoom) {
+  let changed = false;
+  if (!room.state.mode) {
+    room.state.mode = 'multiplayer';
+    changed = true;
+  }
+  for (const robot of room.state.robots) {
+    if (!robot.controller) {
+      robot.controller = 'human';
+      changed = true;
+    }
+    if (robot.controller === 'bot' && !robot.connected) {
+      robot.connected = true;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function shortId(value: string) {

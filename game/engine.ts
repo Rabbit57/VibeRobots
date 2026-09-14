@@ -7,6 +7,7 @@ import type {
   Direction,
   MatchCommand,
   MatchEvent,
+  MatchMode,
   MatchState,
   Position,
   PrivateMatchView,
@@ -33,6 +34,7 @@ export interface SeatSetup {
   seatId: string;
   robotId: string;
   displayName: string;
+  controller?: 'human' | 'bot';
   connected?: boolean;
 }
 
@@ -55,9 +57,10 @@ export function shuffled<T>(items: readonly T[], state: { rngState: number }): T
   return copy;
 }
 
-export function createLobby(roomCode: string, host: SeatSetup, now = Date.now(), seed = cryptoSeed()): MatchState {
+export function createLobby(roomCode: string, host: SeatSetup, now = Date.now(), seed = cryptoSeed(), mode: MatchMode = 'multiplayer'): MatchState {
   return {
     roomCode,
+    mode,
     revision: 0,
     eventRevision: 0,
     phase: 'lobby',
@@ -91,6 +94,7 @@ export function addSeat(state: MatchState, setup: SeatSetup): MatchState {
 function newRobot(setup: SeatSetup, dock: Position): RobotState {
   return {
     ...setup,
+    controller: setup.controller ?? 'human',
     connected: setup.connected ?? false,
     position: { ...dock },
     direction: 'north',
@@ -132,7 +136,10 @@ export function applyCommand(state: MatchState, seatId: string, command: MatchCo
 function startMatch(state: MatchState, seatId: string, courseId: string, fourLifeRule: boolean, events: MatchEvent[]) {
   if (state.phase !== 'lobby') throw new RuleError('out-of-turn', 'The match has already started.');
   if (state.hostSeatId !== seatId) throw new RuleError('unauthorized', 'Only the host can start the match.');
-  if (state.robots.length < 2) throw new RuleError('illegal', 'At least two players are required.');
+  if (state.mode === 'multiplayer' && state.robots.length < 2) throw new RuleError('illegal', 'At least two players are required.');
+  if (state.mode === 'solo' && (state.robots.filter((robot) => robot.controller === 'human').length !== 1 || state.robots.filter((robot) => robot.controller === 'bot').length !== 3)) {
+    throw new RuleError('illegal', 'Solo races require one driver and three CPU robots.');
+  }
   const course = COURSE_BY_ID.get(courseId);
   if (!course) throw new RuleError('illegal', 'Unknown course.');
   if (fourLifeRule && state.robots.length < 5) throw new RuleError('illegal', 'The four-life rule is available with five or more players.');
@@ -217,10 +224,21 @@ export function resolveTurn(state: MatchState, events: MatchEvent[] = []): Match
     rotateGears(state, course, events);
     fireLasers(state, course, events);
     touchBoardSites(state, course, events);
+    if (!state.winnerSeatId && finishSoloDefeat(state, events)) break;
     if (state.winnerSeatId) break;
   }
-  if (!state.winnerSeatId) cleanup(state, course, events);
+  if (!state.winnerSeatId && state.completionReason !== 'human-eliminated') cleanup(state, course, events);
   return events;
+}
+
+export function resolveReadyTurn(state: MatchState, now = Date.now()): CommandResult {
+  if (state.phase !== 'programming') throw new RuleError('out-of-turn', 'The factory is not ready to execute.');
+  const unfinished = state.robots.filter((robot) => !robot.eliminated && !robot.destroyed && !robot.poweredDown && !robot.finishedProgramming);
+  if (unfinished.length) throw new RuleError('out-of-turn', 'A robot still needs to finish programming.');
+  const events = resolveTurn(state);
+  state.revision += 1;
+  state.updatedAt = now;
+  return { state, events: finalizeEvents(state, events) };
 }
 
 function executeProgram(state: MatchState, course: CourseDefinition, robot: RobotState, card: ProgramCard, events: MatchEvent[]) {
@@ -359,13 +377,24 @@ function touchBoardSites(state: MatchState, course: CourseDefinition, events: Ma
     if (tile?.checkpoint === needed || adjacentFlag) {
       robot.checkpoint = needed;
       events.push({ ...event('checkpoint', `${robot.displayName} reached checkpoint ${needed}.`, robot), register: state.registerIndex + 1, stage: 'sites', to: { ...robot.position }, source: 'checkpoint' });
-      if (needed === course.checkpoints.length) {
-        state.phase = 'complete'; state.winnerSeatId = robot.seatId; state.completedAt = Date.now();
+      if (needed === course.checkpoints.length && !state.winnerSeatId) {
+        state.phase = 'complete'; state.winnerSeatId = robot.seatId; state.completionReason = 'checkpoint'; state.completedAt = Date.now();
         events.push({ ...event('victory', `${robot.displayName} wins the race!`, robot), register: state.registerIndex + 1, stage: 'sites', to: { ...robot.position }, source: 'checkpoint' });
       }
     }
     if (tile?.archive || tile?.checkpoint) robot.archive = { ...robot.position };
   }
+}
+
+function finishSoloDefeat(state: MatchState, events: MatchEvent[]) {
+  if (state.mode !== 'solo') return false;
+  const human = state.robots.find((robot) => robot.controller === 'human');
+  if (!human?.eliminated) return false;
+  state.phase = 'complete';
+  state.completionReason = 'human-eliminated';
+  state.completedAt = Date.now();
+  events.push({ ...event('defeat', `${human.displayName} is out of archive copies.`, human), register: state.registerIndex + 1, stage: 'cleanup', source: 'elimination' });
+  return true;
 }
 
 function cleanup(state: MatchState, course: CourseDefinition, events: MatchEvent[]) {

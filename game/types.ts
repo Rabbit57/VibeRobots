@@ -2,6 +2,9 @@ export type Direction = 'north' | 'east' | 'south' | 'west';
 export type ProgramKind = 'move1' | 'move2' | 'move3' | 'backup' | 'left' | 'right' | 'uturn';
 export type Phase = 'lobby' | 'programming' | 'executing' | 'decision' | 'paused' | 'complete';
 export type ExecutionStage = 'program' | 'express-conveyor' | 'conveyor' | 'pushers' | 'gears' | 'lasers' | 'sites' | 'cleanup';
+export type MatchMode = 'multiplayer' | 'solo';
+export type RobotController = 'human' | 'bot';
+export type CompletionReason = 'checkpoint' | 'human-eliminated';
 
 export interface Position {
   x: number;
@@ -106,6 +109,7 @@ export interface RobotState {
   seatId: string;
   robotId: string;
   displayName: string;
+  controller: RobotController;
   position: Position;
   direction: Direction;
   archive: Position;
@@ -132,6 +136,7 @@ export interface PendingDecision {
 
 export interface MatchState {
   roomCode: string;
+  mode: MatchMode;
   revision: number;
   eventRevision: number;
   phase: Phase;
@@ -149,6 +154,7 @@ export interface MatchState {
   timerDeadline?: number;
   rngState: number;
   winnerSeatId?: string;
+  completionReason?: CompletionReason;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;

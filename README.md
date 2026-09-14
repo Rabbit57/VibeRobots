@@ -1,6 +1,6 @@
 # Vibe Robots
 
-A server-authoritative 3D factory racing game for 2–8 players, built with React, Three.js, React Three Fiber, Vinext, and Cloudflare Durable Objects.
+A server-authoritative 3D factory racing game for one player against three CPU robots or 2–8 online players, built with React, Three.js, React Three Fiber, Vinext, and Cloudflare Durable Objects.
 
 ## Run locally
 
@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. Create a room in one browser context and join its invite URL in another.
+Open `http://localhost:3000`. Start a solo race, or create an online room in one browser context and join its invite URL in another.
 
 ## Checks
 
@@ -41,6 +41,7 @@ for animation contracts, ImageGen prompts, and performance budgets.
 ## Architecture
 
 - `game/engine.ts` — deterministic 2005-compatible rules engine
+- `game/bot.ts` — deterministic, route-aware solo opponent programming
 - `game/content/` — typed Programs, Options, robots, boards, and courses
 - `worker/index.ts` — Vinext Worker + SQLite `MatchRoom` Durable Object
 - `components/game.tsx` — server connection and the authority/presentation boundary
@@ -48,7 +49,7 @@ for animation contracts, ImageGen prompts, and performance budgets.
 - `game/presentation.ts` — deterministic event-to-keyframe presentation compiler
 - `docs/rules-audit.md` — rule and Option source matrix
 
-Production is configured for [vibe-robots.ailocalops.com](https://vibe-robots.ailocalops.com/). Match state is room-based and authoritative, so the AILO local-save bridge is intentionally disabled.
+Production is configured for [vibe-robots.ailocalops.com](https://vibe-robots.ailocalops.com/). Multiplayer and solo match state are room-based and authoritative, so the AILO local-save bridge is intentionally disabled.
 
 ## Legal
 

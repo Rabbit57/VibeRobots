@@ -4,7 +4,7 @@ import { appendPresentationBatch, applyPresentationEvent, compilePresentation, d
 import type { MatchEvent, PublicRobotView } from '../game/types';
 
 const robot = (): PublicRobotView => ({
-  seatId: 'a', robotId: 'hammer-bot', displayName: 'Ada', position: { x: 1, y: 2 }, direction: 'north', archive: { x: 0, y: 0 },
+  seatId: 'a', robotId: 'hammer-bot', displayName: 'Ada', controller: 'human', position: { x: 1, y: 2 }, direction: 'north', archive: { x: 0, y: 0 },
   damage: 1, lives: 3, checkpoint: 0, registers: [], optionCount: 0, revealedOptions: [], poweredDown: false, powerDownNext: false,
   destroyed: false, eliminated: false, connected: true, finishedProgramming: false,
 });

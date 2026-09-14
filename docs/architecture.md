@@ -4,6 +4,8 @@
 
 The custom Worker delegates ordinary page requests to Vinext and routes each ten-character room code to one SQLite-backed `MatchRoom` Durable Object. The object owns the shuffled decks, RNG state, hands, options, pending decision, registers, timer, seats, and event revision. It persists after every accepted command and uses hibernating WebSockets.
 
+Rooms are explicitly multiplayer or solo. A solo room has one authenticated human seat and three persistent CPU robots that cannot be joined or disconnected. After the human locks a program—or chooses whether to remain powered down—the Durable Object selects legal CPU programs and resolves one turn before broadcasting the combined authoritative event batch. The route-aware planner simulates only public board state, locked registers, and each CPU's private hand; other unrevealed programs are cleared before evaluation.
+
 Seat tokens are 256-bit random values returned once over HTTPS and kept in browser session storage. Only SHA-256 hashes are persisted. Tokens never appear in room URLs, logs, lobby metadata, or broadcast views. A socket authenticates with its first message.
 
 Every command carries a UUID and the expected room revision. The room rejects stale, duplicate, illegal, out-of-turn, and unauthorized commands, then returns a fresh private snapshot. Public views redact hands and unrevealed register cards. Structured logs contain room lifecycle and rejection categories, never tokens, hands, or private choices.

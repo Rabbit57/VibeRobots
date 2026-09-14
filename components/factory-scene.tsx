@@ -1,6 +1,6 @@
 'use client';
 
-import { ContactShadows, Line, OrbitControls, Text, useGLTF } from '@react-three/drei';
+import { ContactShadows, Line, OrbitControls, useGLTF } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
@@ -19,6 +19,7 @@ export interface FactorySceneProps {
   reducedMotion: boolean;
   quality: GraphicsQuality;
   cameraReset: number;
+  onReady?: () => void;
 }
 
 type Kit = { nodes: Record<string, THREE.Mesh> };
@@ -57,9 +58,10 @@ export function FactoryScene(props: FactorySceneProps) {
   );
 }
 
-function SceneContent({ course, robots, activeEvent, stepDurationMs, reducedMotion, quality, cameraReset, shadowMap }: FactorySceneProps & { shadowMap: number }) {
+function SceneContent({ course, robots, activeEvent, stepDurationMs, reducedMotion, quality, cameraReset, shadowMap, onReady }: FactorySceneProps & { shadowMap: number }) {
   const bounds = courseBounds(course);
   const offset = useMemo(() => ({ x: -bounds.width / 2 + 0.5, z: -bounds.height / 2 + 0.5 }), [bounds.height, bounds.width]);
+  useEffect(() => onReady?.(), [onReady]);
   useFrame(({ gl }) => {
     if (process.env.NODE_ENV !== 'production') {
       const metrics = (window as typeof window & { __VIBE_PERF__?: { frames: number; calls?: number; triangles?: number } }).__VIBE_PERF__;
@@ -150,7 +152,7 @@ function FactoryBoard({ course, activeEvent, reducedMotion }: { course: CourseDe
     <Instances node={node('repair')} items={features.repairs} />
     <Instances node={node('checkpoint')} items={features.checkpoints} castShadow />
     <ConveyorArrows items={[...features.conveyors, ...features.express]} />
-    {features.checkpoints.map((item) => <Text key={`checkpoint-${item.number}`} position={[item.x, 0.87, item.z]} fontSize={0.22} color="#2b1f36" anchorX="center" anchorY="middle">{item.number}</Text>)}
+    <CheckpointPips items={features.checkpoints} />
   </group>;
 }
 
@@ -198,6 +200,28 @@ function ConveyorArrows({ items }: { items: Instance[] }) {
   return <instancedMesh ref={ref} args={[undefined, undefined, items.length]}>
     <coneGeometry args={[0.14, 0.34, 3]} />
     <meshBasicMaterial color="#fff2d8" toneMapped={false} />
+  </instancedMesh>;
+}
+
+function CheckpointPips({ items }: { items: Array<Instance & { number: number }> }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const pips = useMemo(() => items.flatMap((item) => Array.from({ length: item.number }, (_, index) => {
+    const angle = -Math.PI / 2 + (index - (item.number - 1) / 2) * 0.62;
+    return { x: item.x + Math.cos(angle) * 0.13, z: item.z + Math.sin(angle) * 0.13 };
+  })), [items]);
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    const matrix = new THREE.Matrix4();
+    pips.forEach((pip, index) => {
+      matrix.makeTranslation(pip.x, 0.69, pip.z);
+      ref.current!.setMatrixAt(index, matrix);
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+  }, [pips]);
+  if (pips.length === 0) return null;
+  return <instancedMesh ref={ref} args={[undefined, undefined, pips.length]} frustumCulled>
+    <sphereGeometry args={[0.052, 10, 7]} />
+    <meshBasicMaterial color="#2b1f36" toneMapped={false} />
   </instancedMesh>;
 }
 
