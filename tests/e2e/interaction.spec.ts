@@ -153,6 +153,11 @@ test("a live robot travels smoothly at the slower default pace", async ({ page }
   for (let i = 1; i < samples.length; i++)
     expect(distance(samples[i])).toBeGreaterThanOrEqual(distance(samples[i - 1]) - 0.01);
   // Changing pace mid-playback must let the queue finish and unlock the next hand.
+  const respawn = page.getByRole("dialog", { name: "Choose your respawn" });
+  if (await respawn.isVisible()) {
+    await respawn.getByRole("button", { name: /north/i }).click();
+    await respawn.locator(".primary").click();
+  }
   await page.getByRole("button", { name: "1×", exact: true }).click();
   await expect(page.locator(".game-root")).toHaveAttribute("data-playback", "idle", {
     timeout: 120_000,
@@ -172,4 +177,23 @@ test("damage tokens, locked programs and lives are explicit", async ({ page }) =
   await page.locator(".program-card").nth(0).click();
   await page.locator(".program-card").nth(1).click();
   await expect(page.getByRole("button", { name: /lock in 2\/2/i })).toBeEnabled();
+});
+
+test("one lost life shows one empty heart, and respawn offers square and facing choices", async ({ page }) => {
+  await page.goto("/?visual=respawn-choice");
+  await expect(page.locator(".robot-health .life-hearts")).toHaveAttribute("aria-label", "2 of 3 lives");
+  await expect(page.locator(".robot-health .heart-full")).toHaveCount(2);
+  await expect(page.locator(".robot-health .heart-empty")).toHaveCount(1);
+  await expect(page.getByRole("dialog", { name: "Choose your respawn" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "RESPAWN AT H6" })).toBeDisabled();
+  await page.getByRole("button", { name: "J6", exact: true }).click();
+  await page.locator(".respawn-directions").getByRole("button", { name: /east/i }).click();
+  await expect(page.getByRole("button", { name: "RESPAWN AT J6 FACING EAST" })).toBeEnabled();
+});
+
+test("a conveyor bend announces the robot's heading change", async ({ page }) => {
+  await page.goto("/?visual=conveyor-turn");
+  await expect(page.locator(".belt-turn-callout")).toContainText("CONVEYOR TURN");
+  await expect(page.locator(".belt-turn-callout")).toContainText("Grace faces east (north → east)");
+  await expect(page.locator(".status-strip")).toContainText("Conveyor turn");
 });

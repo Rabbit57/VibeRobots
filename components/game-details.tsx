@@ -111,6 +111,7 @@ function GearSymbol({ direction }: { direction: "left" | "right" }) {
 export function TurnTimeline({ playback }: { playback: PlaybackView }) {
   const stage = playback.active?.event.stage ?? "program";
   const current = TURN_STAGES.findIndex((item) => item.id === stage);
+  const bend = playback.active?.event.source === "conveyor-bend" ? playback.active.event : undefined;
   return (
     <section
       className={`turn-timeline ${playback.playing ? "is-playing" : ""}`}
@@ -154,6 +155,12 @@ export function TurnTimeline({ playback }: { playback: PlaybackView }) {
           </li>
         ))}
       </ol>
+      {bend && (
+        <div className="belt-turn-callout" role="status">
+          <b aria-hidden="true">{bend.message.includes("turned left") ? "↺" : "↻"}</b>
+          <span><strong>CONVEYOR TURN</strong> {bend.message.split(" turned ")[0]} faces {bend.toDirection} ({bend.fromDirection} → {bend.toDirection})</span>
+        </div>
+      )}
     </section>
   );
 }
@@ -574,6 +581,6 @@ export function actionDescription(event?: MatchEvent, robots: PublicRobotView[] 
     return `${name} ${verb} ${direction} · ${square(event.from)} → ${square(event.to)}`;
   }
   if (event.type === "turn" || event.type === "gear")
-    return `${name} turns ${event.fromDirection} → ${event.toDirection}${event.source === "conveyor-bend" ? " with the belt" : event.type === "gear" ? " on a gear" : ""}`;
+    return `${name} turns ${event.fromDirection} → ${event.toDirection}${event.source === "conveyor-bend" ? " on a conveyor bend" : event.type === "gear" ? " on a gear" : ""}`;
   return event.message;
 }

@@ -153,7 +153,7 @@ export function applyPresentationEvent(
     if (event.type === "damage") next.damage = Math.min(10, next.damage + (event.damage ?? 0));
     if (event.type === "destroyed") {
       next.destroyed = true;
-      next.lives = Math.max(0, next.lives - 1);
+      next.lives = Number(event.data?.lives ?? Math.max(0, next.lives - 1));
     }
     if (event.type === "eliminated") {
       next.destroyed = true;
@@ -163,6 +163,7 @@ export function applyPresentationEvent(
     if (event.type === "respawn") {
       next.destroyed = false;
       next.damage = Number(event.data?.damage ?? 2);
+      if (event.data?.lives !== undefined) next.lives = Number(event.data.lives);
     }
     if (event.type === "checkpoint") next.checkpoint += 1;
     if (event.type === "power-down") {

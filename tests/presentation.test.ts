@@ -181,6 +181,16 @@ test("rear lasers never rotate a robot and respawn respects archive repair", () 
   assert.equal(returned[0].damage, 0);
 });
 
+test("a repeated destruction keyframe cannot remove a second heart", () => {
+  const destroyed = event(1, "destroyed", { data: { lives: 2 } });
+  const once = applyPresentationEvent([robot()], destroyed);
+  const twice = applyPresentationEvent(once, destroyed);
+  assert.equal(once[0].lives, 2);
+  assert.equal(twice[0].lives, 2);
+  const returned = applyPresentationEvent(twice, event(2, "respawn", { to: { x: 0, y: 0 }, data: { lives: 2, damage: 2 } }));
+  assert.equal(returned[0].lives, 2);
+});
+
 test("damage and destruction keep the active register and factory stage", () => {
   const steps = compilePresentation(
     [

@@ -798,6 +798,7 @@ function phaseLabel(phase: string) {
 
 function playbackLabel(event?: MatchEvent) {
   if (!event) return "Winding the gears";
+  if (event.source === "conveyor-bend") return `Register ${event.register} · Conveyor turn · ${event.fromDirection} → ${event.toDirection}`;
   const label = TURN_STAGES.find((stage) => stage.id === event.stage)?.label ?? event.type;
   return event.register ? `Register ${event.register} · ${label}` : label;
 }

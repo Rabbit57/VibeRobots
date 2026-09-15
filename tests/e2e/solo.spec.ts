@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test("solo skips to the authoritative turn result and reconnects", async ({ page, request }) => {
   test.setTimeout(180_000);
@@ -55,7 +55,7 @@ test("solo skips to the authoritative turn result and reconnects", async ({ page
         return Boolean(
           match &&
           match.public.revision >= startingRevision + 4 &&
-          ["programming", "complete"].includes(match.public.phase) &&
+          ["decision", "programming", "complete"].includes(match.public.phase) &&
           !match.public.timerDeadline &&
           match.events.filter(
             (event) => event.type === "program-ready" && event.seatId?.startsWith("cpu-"),
@@ -77,13 +77,14 @@ test("solo skips to the authoritative turn result and reconnects", async ({ page
   await skip.click();
   await expect(page.locator(".game-root")).toHaveAttribute("data-playback", "idle");
   await expect(skip).toHaveCount(0);
-  await expect(cards.first()).toBeEnabled();
   await expect
     .poll(() => page.evaluate(() => (window as any).__VIBE_PLAYBACK__.robots))
     .toEqual(result.robots);
   expect(await page.evaluate(() => (window as any).__VIBE_MATCH__.public.revision)).toBe(
     result.revision,
   );
+  await settleRespawn(page);
+  await expect(cards.first()).toBeEnabled();
 
   // Skipping clears this queue only; a later turn still has its own animation and skip.
   const open = await page.evaluate(() => {
@@ -108,11 +109,21 @@ test("solo skips to the authoritative turn result and reconnects", async ({ page
       }),
     )
     .toBe(true);
+  await settleRespawn(page);
 
   await page.reload();
   await expect(page.locator(".program-console, .result-modal")).toBeVisible({ timeout: 30_000 });
   await expect(page.locator(".roster-panel > div").filter({ hasText: /CPU/ })).toHaveCount(3);
 });
+
+async function settleRespawn(page: Page) {
+  const dialog = page.getByRole("dialog", { name: "Choose your respawn" });
+  if (!(await dialog.isVisible())) return;
+  await dialog.locator(".respawn-directions button:not(:disabled)").first().click();
+  await dialog.locator(".primary").click();
+  await expect.poll(() => page.evaluate(() => (window as any).__VIBE_MATCH__?.public.phase)).toBe("programming");
+  await expect(page.locator(".game-root")).toHaveAttribute("data-playback", "idle", { timeout: 30_000 });
+}
 
 test("room creation rejects an unknown match mode", async ({ request }) => {
   const response = await request.post("/api/rooms", {

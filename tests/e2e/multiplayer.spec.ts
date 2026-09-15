@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 test('two players create, join, start, program, and reconnect', async ({ browser }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(240_000);
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
   const host = await hostContext.newPage();
@@ -45,8 +45,33 @@ test('two players create, join, start, program, and reconnect', async ({ browser
       const match = (window as typeof window & { __VIBE_MATCH__?: { public: { revision: number; phase: string; robots: Array<{ finishedProgramming: boolean }> } } }).__VIBE_MATCH__;
       return match ? { revision: match.public.revision, phase: match.public.phase, resolved: match.public.robots.every((robot) => !robot.finishedProgramming) } : undefined;
     })));
-    return Boolean(states[0] && states[1] && states[0].revision >= startRevision + 2 && states[0].revision === states[1].revision && states[0].phase === states[1].phase && states[0].resolved && states[1].resolved && ['programming', 'complete'].includes(states[0].phase));
-  }).toBe(true);
+    return Boolean(states[0] && states[1] && states[0].revision >= startRevision + 2 && states[0].revision === states[1].revision && states[0].phase === states[1].phase && ['decision', 'programming', 'complete'].includes(states[0].phase));
+  }, { timeout: 45_000 }).toBe(true);
+  for (let choice = 0; choice < 2; choice += 1) {
+    const phase = await host.evaluate(() => (window as typeof window & { __VIBE_MATCH__?: { public: { phase: string } } }).__VIBE_MATCH__?.public.phase);
+    if (phase !== 'decision') break;
+    const hostDecision = await host.evaluate(() => Boolean((window as typeof window & { __VIBE_MATCH__?: { decision?: unknown } }).__VIBE_MATCH__?.decision));
+    const chooser = hostDecision ? host : guest;
+    const before = await host.evaluate(() => (window as typeof window & { __VIBE_MATCH__?: { public: { revision: number } } }).__VIBE_MATCH__?.public.revision ?? 0);
+    const dialog = chooser.getByRole('dialog', { name: 'Choose your respawn' });
+    await expect(dialog).toBeVisible({ timeout: 120_000 });
+    await dialog.locator('.respawn-directions button:not(:disabled)').first().click();
+    await dialog.locator('.primary').click();
+    await expect.poll(async () => {
+      const revisions = await Promise.all([host, guest].map((page) => page.evaluate(() => {
+        const match = (window as typeof window & { __VIBE_MATCH__?: { public: { revision: number } } }).__VIBE_MATCH__;
+        return match?.public.revision ?? 0;
+      })));
+      return revisions[0] > before && revisions[0] === revisions[1];
+    }, { timeout: 30_000 }).toBe(true);
+  }
+  await expect.poll(async () => {
+    const state = await host.evaluate(() => {
+      const match = (window as typeof window & { __VIBE_MATCH__?: { public: { phase: string; robots: Array<{ finishedProgramming: boolean }> } } }).__VIBE_MATCH__;
+      return { phase: match?.public.phase, ready: match?.public.robots.every((robot) => !robot.finishedProgramming) };
+    });
+    return Boolean(state.ready && ['programming', 'complete'].includes(state.phase ?? ''));
+  }, { timeout: 30_000 }).toBe(true);
   const publicResult = async (page: typeof host) => page.evaluate(() => {
     const match = (window as typeof window & { __VIBE_MATCH__: { public: { revision: number; phase: string; robots: unknown[] }; events: Array<{ revision: number; type: string; public: boolean }> } }).__VIBE_MATCH__;
     return {

@@ -258,6 +258,15 @@ function activateOption(state: MatchState, seatId: string, optionId: string, pay
 function resolveDecision(state: MatchState, seatId: string, choice: string, events: MatchEvent[]) {
   if (!state.pendingDecision || state.pendingDecision.seatId !== seatId) throw new RuleError('out-of-turn', 'No decision is waiting for this seat.');
   if (!state.pendingDecision.choices.includes(choice)) throw new RuleError('illegal', 'That choice is unavailable.');
+  if (state.pendingDecision.kind === 'respawn-location') {
+    const [square, direction] = choice.split('|');
+    const [x, y] = square.split(',').map(Number);
+    respawnRobot(robotFor(state, seatId), { x, y }, direction as Direction, events);
+    state.pendingDecision = undefined;
+    state.respawnQueue?.shift();
+    continueRespawns(state, requireCourse(state), events);
+    return;
+  }
   state.pendingDecision = undefined;
   state.phase = 'programming';
   events.push(event('decision', 'A pending choice was resolved.', robotFor(state, seatId)));
@@ -515,9 +524,50 @@ function cleanup(state: MatchState, course: CourseDefinition, events: MatchEvent
       }
     }
   }
-  // Reset every surviving replacement as well, without granting it a site reward.
+  const destroyed = events.filter((item) => item.type === 'destroyed');
+  state.respawnQueue = orderByDock(state, state.robots)
+    .filter((robot) => robot.destroyed && !robot.eliminated)
+    .sort((a, b) => {
+      const first = destroyed.findIndex((item) => item.seatId === a.seatId);
+      const second = destroyed.findIndex((item) => item.seatId === b.seatId);
+      const firstEvent = destroyed[first];
+      const secondEvent = destroyed[second];
+      // Conveyor hazards and laser damage can destroy robots simultaneously.
+      // The official FAQ breaks those ties using starting-dock order.
+      const simultaneousStage = firstEvent?.data?.deathStage;
+      if (firstEvent && secondEvent && ['express-conveyor', 'conveyor', 'lasers'].includes(String(simultaneousStage)) && simultaneousStage === secondEvent.data?.deathStage && firstEvent.register === secondEvent.register && firstEvent.source === secondEvent.source) return 0;
+      return (first < 0 ? Infinity : first) - (second < 0 ? Infinity : second);
+    })
+    .map((robot) => robot.seatId);
+  continueRespawns(state, course, events);
+}
+
+function continueRespawns(state: MatchState, course: CourseDefinition, events: MatchEvent[]) {
+  while (state.respawnQueue?.length) {
+    const robot = robotFor(state, state.respawnQueue[0]);
+    const choices = respawnChoices(state, course, robot);
+    if (!choices.length) {
+      state.respawnQueue.shift();
+      continue;
+    }
+    if (robot.controller === 'human') {
+      state.pendingDecision = {
+        seatId: robot.seatId,
+        kind: 'respawn-location',
+        choices,
+        context: { archive: { ...robot.archive }, occupied: Boolean(robotAt(state, robot.archive, robot.seatId)) },
+      };
+      state.phase = 'decision';
+      return;
+    }
+    const [square, direction] = choices[0].split('|');
+    const [x, y] = square.split(',').map(Number);
+    respawnRobot(robot, { x, y }, direction as Direction, events);
+    state.respawnQueue.shift();
+  }
+  state.respawnQueue = undefined;
+  // Reset every surviving replacement without granting it a site reward.
   for (const robot of orderByDock(state, state.robots)) {
-    if (robot.destroyed && !robot.eliminated) respawnRobot(state, course, robot, events);
     if (robot.destroyed || robot.eliminated) continue;
     updateLockedRegisters(robot);
     const flywheelCard = robot.optionState.flywheelCard as string | undefined;
@@ -584,20 +634,48 @@ function destroyRobot(robot: RobotState, events: MatchEvent[], cause: string) {
   robot.lives -= 1;
   if (robot.options.length) robot.options.splice(0, 1);
   if (robot.lives <= 0) robot.eliminated = true;
-  events.push({ ...event(robot.eliminated ? 'eliminated' : 'destroyed', `${robot.displayName} was ${robot.eliminated ? 'eliminated' : 'destroyed'} by ${cause}.`, robot), stage: 'cleanup', from: { ...robot.position }, source: cause });
+  const activeStage = [...events].reverse().find((item) => item.type === 'stage');
+  events.push({ ...event(robot.eliminated ? 'eliminated' : 'destroyed', `${robot.displayName} was ${robot.eliminated ? 'eliminated' : 'destroyed'} by ${cause}.`, robot), register: activeStage?.register, stage: 'cleanup', from: { ...robot.position }, source: cause, data: { lives: robot.lives, deathStage: activeStage?.stage } });
 }
 
-function respawnRobot(state: MatchState, course: CourseDefinition, robot: RobotState, events: MatchEvent[]) {
+function respawnChoices(state: MatchState, course: CourseDefinition, robot: RobotState): string[] {
+  const archiveFree = insideCourse(course, robot.archive) && !courseTile(course, robot.archive.x, robot.archive.y)?.pit && !robotAt(state, robot.archive, robot.seatId);
+  if (archiveFree) return DIRECTIONS.map((direction) => `${robot.archive.x},${robot.archive.y}|${direction}`);
+  const bounds = courseBounds(course);
+  for (let radius = 1; radius <= Math.max(bounds.width, bounds.height); radius += 1) {
+    const choices: string[] = [];
+    for (let y = robot.archive.y - radius; y <= robot.archive.y + radius; y += 1)
+      for (let x = robot.archive.x - radius; x <= robot.archive.x + radius; x += 1) {
+        if (Math.max(Math.abs(x - robot.archive.x), Math.abs(y - robot.archive.y)) !== radius) continue;
+        const position = { x, y };
+        if (!insideCourse(course, position) || courseTile(course, x, y)?.pit || robotAt(state, position, robot.seatId)) continue;
+        for (const direction of DIRECTIONS) {
+          let visible = false;
+          let cursor = position;
+          for (let distance = 1; distance <= 3; distance += 1) {
+            if (blockedByWall(course, cursor, direction)) break;
+            cursor = { x: cursor.x + VECTORS[direction].x, y: cursor.y + VECTORS[direction].y };
+            if (!insideCourse(course, cursor)) break;
+            if (robotAt(state, cursor, robot.seatId)) { visible = true; break; }
+          }
+          if (!visible) choices.push(`${x},${y}|${direction}`);
+        }
+      }
+    if (choices.length) return choices;
+  }
+  return [];
+}
+
+function respawnRobot(robot: RobotState, position: Position, direction: Direction, events: MatchEvent[]) {
   const from = { ...robot.position };
-  const candidates = [robot.archive, ...DIRECTIONS.map((direction) => ({ x: robot.archive.x + VECTORS[direction].x, y: robot.archive.y + VECTORS[direction].y }))];
-  const position = candidates.find((candidate) => insideCourse(course, candidate) && !courseTile(course, candidate.x, candidate.y)?.pit && !robotAt(state, candidate, robot.seatId));
-  if (!position) return;
+  const fromDirection = robot.direction;
   robot.position = { ...position };
+  robot.direction = direction;
   robot.destroyed = false;
   robot.damage = hasOption(robot, 'superior-archive-copy') ? 0 : 2;
   robot.registers.forEach((register) => { register.card = null; register.locked = false; });
   robot.options = robot.options.filter((option) => option.id !== 'superior-archive-copy');
-  events.push({ ...event('respawn', `${robot.displayName} returned from its archive copy.`, robot), stage: 'cleanup', source: 'archive-copy', data: { damage: robot.damage }, from, to: { ...position }, path: [from, { ...position }], fromDirection: robot.direction, toDirection: robot.direction });
+  events.push({ ...event('respawn', `${robot.displayName} returned from its archive copy facing ${direction}.`, robot), stage: 'cleanup', source: 'archive-copy', data: { damage: robot.damage, lives: robot.lives }, from, to: { ...position }, path: [from, { ...position }], fromDirection, toDirection: direction });
 }
 
 export function updateLockedRegisters(robot: RobotState) {
@@ -719,6 +797,7 @@ export function publicView(state: MatchState): PublicMatchView {
     recentCommandIds: _commands,
     rngState: _rngState,
     pendingDecision: _pendingDecision,
+    respawnQueue: _respawnQueue,
     robots,
     ...publicState
   } = state;

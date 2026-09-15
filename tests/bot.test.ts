@@ -73,6 +73,10 @@ describe('single-player CPU racing', () => {
     const events = programSoloBots(state);
     assert.equal(events.filter((event) => event.type === 'program-ready' && event.seatId?.startsWith('cpu-')).length, 3);
     assert.equal(state.revision, revision + 3);
+    if (state.pendingDecision) {
+      const decision = state.pendingDecision;
+      applyCommand(state, decision.seatId, { type: 'decision', id: 'return-human', revision: state.revision, choice: decision.choices[0] }, 4);
+    }
     assert.equal(state.phase, 'programming');
     assert.equal(state.timerDeadline, undefined);
   });

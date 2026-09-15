@@ -283,6 +283,8 @@ test("repair and upgrades happen only at cleanup; a respawn does not receive a f
   assert.equal(events.find((event) => event.type === "option-acquired")?.stage, "cleanup");
   Object.assign(robot, { destroyed: true, damage: 10, options: [] });
   resolveTurn(state);
+  assert.equal(state.phase, "decision");
+  applyCommand(state, robot.seatId, { type: "decision", id: "repair-respawn", revision: state.revision, choice: "3,3|north" });
   assert.equal(robot.damage, 2);
   assert.equal(robot.options.length, 0);
 });
@@ -294,12 +296,70 @@ test("starting docks remain valid for movement and archive respawn; gaps are sti
   robot.poweredDown = false;
   robot.powerDownNext = false;
   robot.optionState = { gyroscopicStabilizer: true };
-  const events = resolveTurn(state);
-  assert.deepEqual(events.find((event) => event.type === "respawn")?.to, robot.archive);
+  resolveTurn(state);
+  assert.equal(state.phase, "decision");
+  assert.ok(state.pendingDecision?.choices.includes("0,12|north"));
+  const returned = applyCommand(state, robot.seatId, { type: "decision", id: "dock-respawn", revision: state.revision, choice: "0,12|north" });
+  assert.deepEqual(returned.events.find((event) => event.type === "respawn")?.to, robot.archive);
   assert.deepEqual(robot.optionState, {});
   assert.equal(robot.damage, 2);
   assert.ok(courseTile(course, 0, 12));
   assert.equal(courseTile(course, 2, 12), undefined);
+});
+
+test("respawn facing is chosen; an occupied archive offers diagonal squares and safe headings", () => {
+  const { state } = fixture({ "4,4": { pit: true } });
+  const [returning, occupant] = state.robots;
+  Object.assign(returning, { destroyed: true, archive: { x: 5, y: 5 }, direction: "west", damage: 10, lives: 2, poweredDown: false, powerDownNext: false });
+  Object.assign(occupant, { position: { x: 5, y: 5 } });
+  resolveTurn(state);
+  const choices = state.pendingDecision?.choices ?? [];
+  assert.equal(state.phase, "decision");
+  assert.equal(state.pendingDecision?.context?.occupied, true);
+  assert.ok(choices.includes("6,4|north"), "diagonal square should be selectable");
+  assert.ok(!choices.some((choice) => choice.startsWith("4,4|")), "pit must be excluded");
+  assert.ok(!choices.includes("4,5|east"), "facing a nearby robot is illegal");
+  assert.ok(choices.includes("4,5|north"));
+  assert.throws(() => applyCommand(state, returning.seatId, { type: "decision", id: "unsafe", revision: state.revision, choice: "4,5|east" }), /unavailable/);
+  const result = applyCommand(state, returning.seatId, { type: "decision", id: "safe", revision: state.revision, choice: "6,4|north" });
+  assert.deepEqual(returning.position, { x: 6, y: 4 });
+  assert.equal(returning.direction, "north");
+  assert.equal(returning.lives, 2);
+  assert.equal(returning.damage, 2);
+  assert.equal(state.phase, "programming");
+  assert.equal(result.events.find((event) => event.type === "respawn")?.toDirection, "north");
+});
+
+test("if every adjacent respawn square is a pit, choices expand to the next band", () => {
+  const pits: Record<string, TileDefinition> = {};
+  for (let y = 4; y <= 6; y += 1) for (let x = 4; x <= 6; x += 1)
+    if (x !== 5 || y !== 5) pits[`${x},${y}`] = { pit: true };
+  const { state } = fixture(pits);
+  const [returning, occupant] = state.robots;
+  Object.assign(returning, { destroyed: true, archive: { x: 5, y: 5 } });
+  Object.assign(occupant, { position: { x: 5, y: 5 } });
+  resolveTurn(state);
+  assert.ok(state.pendingDecision?.choices.some((choice) => choice.startsWith("3,3|")));
+  assert.ok(state.pendingDecision?.choices.every((choice) => {
+    const [x, y] = choice.split("|")[0].split(",").map(Number);
+    return Math.max(Math.abs(x - 5), Math.abs(y - 5)) === 2;
+  }));
+});
+
+test("simultaneous conveyor deaths use dock order when archive markers overlap", () => {
+  const { state } = fixture();
+  const [first, second] = state.robots;
+  for (const robot of [first, second])
+    Object.assign(robot, { controller: "bot", destroyed: true, lives: 2, archive: { x: 5, y: 5 }, poweredDown: false, powerDownNext: false });
+  const deaths: MatchEvent[] = [first, second].map((robot) => ({
+    revision: 0, type: "destroyed", message: "destroyed", seatId: robot.seatId,
+    source: "factory hazard", register: 1, stage: "cleanup", public: true,
+    data: { lives: 2, deathStage: "conveyor" },
+  }));
+  resolveTurn(state, deaths);
+  assert.deepEqual(second.position, { x: 5, y: 5 });
+  assert.notDeepEqual(second.position, first.position);
+  assert.equal(state.phase, "programming");
 });
 
 test("spawn choices are exclusive, required, retained across courses and determine dock priority", () => {

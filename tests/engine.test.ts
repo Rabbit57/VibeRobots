@@ -169,6 +169,8 @@ describe('movement, board order, and damage', () => {
     setProgram(state, 'seat-a', [p(490), null, null, null, null]);
     setProgram(state, 'seat-b', [null, null, null, null, null]);
     resolveTurn(state);
+    assert.equal(state.phase, 'decision');
+    applyCommand(state, robot.seatId, { type: 'decision', id: 'face-west', revision: state.revision, choice: '7,1|west' });
     assert.equal(robot.destroyed, false);
     assert.equal(robot.damage, 2);
     assert.equal(robot.lives, 2);
@@ -196,9 +198,9 @@ describe('authority, redaction, and deterministic replay', () => {
 
   // Includes chosen docks, corrected board physics and the respawn repair snapshot.
   const expectedGolden: Record<string, string> = {
-    'risky-exchange': '67dd030b14cca65e',
-    'dizzy-dash': '0a76d95664e7b958',
-    'against-the-grain': 'bde758716ad838a7',
+    'risky-exchange': 'e9e836d5ad5ef1f1',
+    'dizzy-dash': '2d3a0ed30df01999',
+    'against-the-grain': '7d945d97a14baa14',
   };
   for (const course of COURSES) test(`golden deterministic replay: ${course.name}`, () => {
     const replay = () => {
@@ -207,6 +209,10 @@ describe('authority, redaction, and deterministic replay', () => {
       for (const seatId of ['seat-a', 'seat-b']) {
         const cards = state.hands[seatId].slice(0, 5).map((card) => card.id);
         events.push(...applyCommand(state, seatId, { type: 'program', id: `turn-${seatId}`, revision: state.revision, cards }, 3).events);
+      }
+      while (state.pendingDecision) {
+        const decision = state.pendingDecision;
+        events.push(...applyCommand(state, decision.seatId, { type: 'decision', id: `respawn-${decision.seatId}`, revision: state.revision, choice: decision.choices[0] }, 4).events);
       }
       return createHash('sha256').update(JSON.stringify({ events, robots: state.robots, rng: state.rngState })).digest('hex').slice(0, 16);
     };

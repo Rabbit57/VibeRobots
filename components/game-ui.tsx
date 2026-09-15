@@ -7,7 +7,7 @@ import { BOARD_BY_ID, COURSES } from "@/game/content/boards";
 import { OPTION_BY_ID } from "@/game/content/options";
 import { PROGRAM_LABELS } from "@/game/content/programs";
 import { ROBOTS, ROBOT_BY_ID } from "@/game/content/robots";
-import type { MatchEvent, PrivateMatchView, ProgramCard, PublicRobotView } from "@/game/types";
+import type { Direction, MatchEvent, PendingDecision, PrivateMatchView, ProgramCard, PublicRobotView } from "@/game/types";
 
 const COURSE_IMAGES: Record<string, string> = {
   "risky-exchange": "0%",
@@ -414,6 +414,9 @@ export function MatchHud({
   return (
     <>
       <TurnTimeline playback={playback} />
+      {view.decision?.kind === "respawn-location" && !playback.playing && (
+        <RespawnPicker key={`${view.public.revision}-${view.decision.seatId}`} decision={view.decision} choose={resolveDecision} />
+      )}
       <aside className="roster-panel" aria-label="Drivers">
         <p className="section-label">
           RACE CREW <span>{sceneRobots.length} DRIVERS</span>
@@ -724,7 +727,7 @@ export function MatchHud({
           </div>
         )}
       </section>
-      {view.decision && (
+      {view.decision && view.decision.kind !== "respawn-location" && !playback.playing && (
         <div className="modal-backdrop">
           <section className="decision-modal" role="dialog" aria-modal="true">
             <p className="kicker">YOUR ROBOT NEEDS HELP</p>
@@ -756,6 +759,60 @@ export function LifeHearts({ lives, total = 3 }: { lives: number; total?: number
         </span>
       ))}
     </span>
+  );
+}
+
+function RespawnPicker({ decision, choose }: { decision: PendingDecision; choose: (choice: string) => void }) {
+  const squares = [...new Set(decision.choices.map((choice) => choice.split("|")[0]))];
+  const [square, setSquare] = useState(squares[0]);
+  const [direction, setDirection] = useState<Direction>();
+  const legalDirections = decision.choices
+    .filter((choice) => choice.startsWith(`${square}|`))
+    .map((choice) => choice.split("|")[1] as Direction);
+  const occupied = Boolean(decision.context?.occupied);
+  const squareLabel = (value: string) => {
+    const [x, y] = value.split(",").map(Number);
+    return `${String.fromCharCode(65 + x)}${y + 1}`;
+  };
+  return (
+    <div className="respawn-backdrop">
+      <section className="respawn-dialog" role="dialog" aria-modal="true" aria-labelledby="respawn-title">
+        <p className="kicker">ARCHIVE COPY READY</p>
+        <h2 id="respawn-title">Choose your respawn</h2>
+        <p>
+          {occupied
+            ? "Your archive square is occupied. Pick an open nearby square, then face a safe direction."
+            : `Return to your archive at ${squareLabel(square)}. Choose which way your robot faces.`}
+        </p>
+        {occupied && (
+          <fieldset className="respawn-squares">
+            <legend>1. Select a square</legend>
+            <div>
+              {squares.map((value) => (
+                <button key={value} type="button" aria-pressed={square === value} onClick={() => { setSquare(value); setDirection(undefined); }}>
+                  {squareLabel(value)}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+        )}
+        <fieldset className="respawn-directions">
+          <legend>{occupied ? "2. Choose facing" : "Choose facing"}</legend>
+          <div>
+            {(["north", "east", "south", "west"] as Direction[]).map((value) => (
+              <button key={value} type="button" aria-pressed={direction === value} disabled={!legalDirections.includes(value)} onClick={() => setDirection(value)}>
+                <b aria-hidden="true">{{ north: "↑", east: "→", south: "↓", west: "←" }[value]}</b>
+                {value}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+        {occupied && <small>Only empty squares outside pits are offered. Facing a robot within three squares is unavailable.</small>}
+        <button className="primary" type="button" disabled={!direction} onClick={() => choose(`${square}|${direction}`)}>
+          RESPAWN AT {squareLabel(square)} {direction ? `FACING ${direction.toUpperCase()}` : ""}
+        </button>
+      </section>
+    </div>
   );
 }
 

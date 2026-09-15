@@ -2989,6 +2989,23 @@ input[type="checkbox"] {
 .life-hearts > span { display: inline !important; font-size: 18px; line-height: 1; }
 .heart-full { color: #d43949; text-shadow: 0 1px 0 #a21e3020; }
 .heart-empty { color: #d7c3c2; }
+.belt-turn-callout { position: absolute; top: calc(100% + 7px); left: 0; z-index: 12; display: flex; align-items: center; gap: 10px; padding: 9px 14px; border: 2px solid #bd7a27; border-radius: 11px; background: #fff4d8; color: #714518; box-shadow: 0 5px 18px #513b1930; font-size: 12px; }
+.belt-turn-callout > b { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 50%; background: #db943a; color: white; font-size: 22px; }
+.belt-turn-callout strong { margin-right: 6px; letter-spacing: .6px; }
+.respawn-backdrop { position: absolute; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px; background: #263b34a8; }
+.respawn-dialog { width: min(520px, 100%); max-height: min(90vh, 800px); overflow-y: auto; padding: 25px; border: 2px solid #d4b37e; border-radius: 20px; background: #fffdf4; box-shadow: 0 18px 70px #1e312850; }
+.respawn-dialog h2 { margin: 6px 0 10px; font: 600 29px "Fraunces", serif; }
+.respawn-dialog p:not(.kicker) { margin: 0 0 18px; line-height: 1.5; font-size: 13px; }
+.respawn-dialog fieldset { margin: 0 0 18px; padding: 0; border: 0; }
+.respawn-dialog legend { margin-bottom: 9px; font-size: 11px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase; }
+.respawn-dialog fieldset > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.respawn-dialog fieldset button { min-width: 47px; padding: 9px 11px; border: 1px solid #bdc7b5; border-radius: 8px; background: #f6f7ef; color: #315b43; font-weight: 800; cursor: pointer; }
+.respawn-dialog fieldset button[aria-pressed="true"] { border-color: #345f4b; background: #345f4b; color: white; }
+.respawn-dialog fieldset button:disabled { opacity: .35; cursor: not-allowed; }
+.respawn-directions button { display: grid; justify-items: center; gap: 2px; flex: 1; text-transform: capitalize; }
+.respawn-directions button b { font-size: 22px; line-height: 1; }
+.respawn-dialog > small { display: block; margin: -6px 0 18px; color: #6c725f; font-size: 10px; line-height: 1.5; }
+.respawn-dialog > .primary { width: 100%; min-height: 46px; }
 .roster-panel .life-hearts { margin: 4px 3px 4px 0; }
 .roster-panel .life-hearts > span { font-size: 15px; }
 .roster-panel .roster-damage { font-size: 10px; }

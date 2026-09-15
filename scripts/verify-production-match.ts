@@ -101,6 +101,13 @@ try {
   await host.waitFor((view) => view.public.revision === guest.view.public.revision);
 
   for (let turn = 1; turn <= 40 && host.view.public.phase !== 'complete'; turn += 1) {
+    while (host.view.public.phase === 'decision') {
+      const chooser = host.view.decision ? host : guest.view.decision ? guest : undefined;
+      if (!chooser?.view.decision) throw new Error('A respawn decision has no connected owner.');
+      const other = chooser === host ? guest : host;
+      await chooser.command({ type: 'decision', choice: chooser.view.decision.choices[0] });
+      await other.waitFor((view) => view.public.revision === chooser.view.public.revision);
+    }
     const guestRobot = ownRobot(guest.view);
     let guestPlan: ProgramCard[] | undefined;
     if (!guestRobot.poweredDown && !guestRobot.finishedProgramming) {

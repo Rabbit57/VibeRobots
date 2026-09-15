@@ -152,6 +152,7 @@ export interface MatchState {
   hands: Record<string, ProgramCard[]>;
   registerIndex: number;
   pendingDecision?: PendingDecision;
+  respawnQueue?: string[];
   timerDeadline?: number;
   timerRemainingMs?: number;
   rngState: number;
@@ -199,7 +200,7 @@ export interface PublicRobotView extends Omit<RobotState, 'registers' | 'options
   revealedOptions: string[];
 }
 
-export interface PublicMatchView extends Omit<MatchState, 'hands' | 'programDeck' | 'optionDeck' | 'recentCommandIds' | 'rngState' | 'pendingDecision' | 'robots'> {
+export interface PublicMatchView extends Omit<MatchState, 'hands' | 'programDeck' | 'optionDeck' | 'recentCommandIds' | 'rngState' | 'pendingDecision' | 'respawnQueue' | 'robots'> {
   robots: PublicRobotView[];
   programDeckCount: number;
   optionDeckCount: number;

@@ -1,6 +1,6 @@
 import type { MatchEvent, PrivateMatchView, ProgramCard, PublicRobotView } from './types';
 
-export type VisualMode = 'home' | 'lobby' | 'damage' | 'programming' | 'laser' | 'destruction' | 'respawn' | 'victory' | 'solo-victory' | 'solo-defeat';
+export type VisualMode = 'home' | 'lobby' | 'damage' | 'programming' | 'laser' | 'destruction' | 'respawn' | 'respawn-choice' | 'conveyor-turn' | 'victory' | 'solo-victory' | 'solo-defeat';
 
 export interface VisualFixture {
   mode: VisualMode;
@@ -49,7 +49,7 @@ function event(type: string, message: string, extra: Partial<MatchEvent>): Match
 
 export function makeVisualFixture(candidate: string): VisualFixture | undefined {
   const mode = candidate as VisualMode;
-  if (!['home', 'lobby', 'damage', 'programming', 'laser', 'destruction', 'respawn', 'victory', 'solo-victory', 'solo-defeat'].includes(mode)) return;
+  if (!['home', 'lobby', 'damage', 'programming', 'laser', 'destruction', 'respawn', 'respawn-choice', 'conveyor-turn', 'victory', 'solo-victory', 'solo-defeat'].includes(mode)) return;
   if (mode === 'home') return { mode, screen: 'home' };
   const ada = robot('ada', 'hammer-bot', 'Ada', 3, 8);
   const grace = robot('grace', 'twitch', 'Grace', 8, 6);
@@ -101,6 +101,18 @@ export function makeVisualFixture(candidate: string): VisualFixture | undefined 
     grace.lives = 2;
     grace.position = { x: 9, y: 10 };
     const activeEvent = event('respawn', 'Grace pops back onto the last archive marker.', { seatId: 'grace', robotId: 'twitch', stage: 'cleanup', from: { x: 8, y: 6 }, to: { x: 9, y: 10 } });
+    return { mode, screen: 'match', view: view('executing', [ada, grace]), activeEvent };
+  }
+  if (mode === 'respawn-choice') {
+    ada.lives = 2;
+    ada.destroyed = true;
+    ada.archive = { x: 8, y: 6 };
+    const choice = view('decision', [ada, grace]);
+    choice.decision = { seatId: 'ada', kind: 'respawn-location', choices: ['7,5|north', '7,5|west', '9,5|east', '9,5|south'], context: { archive: { x: 8, y: 6 }, occupied: true } };
+    return { mode, screen: 'match', view: choice };
+  }
+  if (mode === 'conveyor-turn') {
+    const activeEvent = event('turn', 'Grace turned right with the belt.', { seatId: 'grace', robotId: 'twitch', register: 2, stage: 'conveyor', source: 'conveyor-bend', to: { x: 8, y: 6 }, fromDirection: 'north', toDirection: 'east' });
     return { mode, screen: 'match', view: view('executing', [ada, grace]), activeEvent };
   }
   ada.checkpoint = 4;
